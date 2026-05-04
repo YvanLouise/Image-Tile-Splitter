@@ -143,13 +143,15 @@ export function detectComicPanelsFallback(
   const pageArea = imageData.width * imageData.height;
   return components
     .filter((item) => isPanelBox(item.boundingBox, pageArea, params))
-    .map((item, index) => ({
-      ...item,
-      id: index + 1,
-      order: index,
-      source: "fallback" as const,
+    .map((item) => ({
+      box: item.boundingBox,
       confidence: 0.45,
-    }));
+    }))
+    .slice(0, 80)
+    .map((candidate, index) =>
+      candidatesToItems(imageData, [{ ...candidate, confidence: candidate.confidence }], "fallback")
+        .map((item) => ({ ...item, id: index + 1, order: index }))[0],
+    );
 }
 
 export function candidatesToItems(
@@ -160,19 +162,8 @@ export function candidatesToItems(
   return sortReadingOrder(candidates)
     .map((candidate, index) => {
       const mask = new Uint8Array(candidate.box.width * candidate.box.height);
-      let pixelCount = 0;
-      for (let y = 0; y < candidate.box.height; y += 1) {
-        for (let x = 0; x < candidate.box.width; x += 1) {
-          const imageX = candidate.box.x + x;
-          const imageY = candidate.box.y + y;
-          const inside = candidate.polygon
-            ? pointInPolygon(imageX + 0.5, imageY + 0.5, candidate.polygon)
-            : true;
-          if (!inside) continue;
-          mask[y * candidate.box.width + x] = 1;
-          pixelCount += 1;
-        }
-      }
+      mask.fill(1);
+      const pixelCount = candidate.box.width * candidate.box.height;
       return buildSliceItem(imageData, candidate.box, mask, pixelCount, {
         id: index + 1,
         order: index,
@@ -219,19 +210,19 @@ function detectPanelsByWhitespace(
   const candidates: PanelCandidate[] = [];
   for (let yi = 0; yi < rowCuts.length - 1; yi += 1) {
     for (let xi = 0; xi < colCuts.length - 1; xi += 1) {
-      const box = trimContentBox(
-        imageData,
+      const box = clampBox(
         {
           x: colCuts[xi],
           y: rowCuts[yi],
           width: colCuts[xi + 1] - colCuts[xi],
           height: rowCuts[yi + 1] - rowCuts[yi],
         },
-        whiteThreshold,
+        width,
+        height,
       );
       if (!isPanelBox(box, pageArea, params)) continue;
       const contentScore = estimateContentScore(imageData, box, whiteThreshold);
-      if (contentScore < 0.03) continue;
+      if (contentScore < 0.005) continue;
       candidates.push({
         box,
         confidence: clamp01(0.55 + contentScore * 0.8),
@@ -291,45 +282,6 @@ function rangesToCuts(runs: Array<{ start: number; end: number }>, limit: number
   return [...new Set(cuts)].sort((a, b) => a - b);
 }
 
-function trimContentBox(imageData: ImageData, box: BoundingBox, whiteThreshold: number) {
-  const width = imageData.width;
-  const height = imageData.height;
-  const data = imageData.data;
-  let minX = Math.max(0, box.x);
-  let minY = Math.max(0, box.y);
-  let maxX = Math.min(width - 1, box.x + box.width - 1);
-  let maxY = Math.min(height - 1, box.y + box.height - 1);
-  let contentMinX = maxX;
-  let contentMinY = maxY;
-  let contentMaxX = minX;
-  let contentMaxY = minY;
-  let hasContent = false;
-
-  for (let y = minY; y <= maxY; y += 1) {
-    for (let x = minX; x <= maxX; x += 1) {
-      if (isGutterPixel(data, y * width + x, whiteThreshold)) continue;
-      hasContent = true;
-      if (x < contentMinX) contentMinX = x;
-      if (y < contentMinY) contentMinY = y;
-      if (x > contentMaxX) contentMaxX = x;
-      if (y > contentMaxY) contentMaxY = y;
-    }
-  }
-
-  if (!hasContent) return box;
-  const pad = Math.max(2, Math.round(Math.min(width, height) * 0.004));
-  minX = Math.max(0, contentMinX - pad);
-  minY = Math.max(0, contentMinY - pad);
-  maxX = Math.min(width - 1, contentMaxX + pad);
-  maxY = Math.min(height - 1, contentMaxY + pad);
-  return {
-    x: minX,
-    y: minY,
-    width: Math.max(1, maxX - minX + 1),
-    height: Math.max(1, maxY - minY + 1),
-  };
-}
-
 function isPanelBox(box: BoundingBox, pageArea: number, params: ComicDetectionParams) {
   const boxArea = area(box);
   if (box.width < 12 || box.height < 12) return false;
@@ -362,23 +314,6 @@ function matToPolygon(mat: any): Array<{ x: number; y: number }> | undefined {
     polygon.push({ x: mat.data32S[i], y: mat.data32S[i + 1] });
   }
   return polygon.length >= 3 ? polygon : undefined;
-}
-
-function pointInPolygon(
-  x: number,
-  y: number,
-  polygon: Array<{ x: number; y: number }>,
-) {
-  let inside = false;
-  for (let i = 0, j = polygon.length - 1; i < polygon.length; j = i, i += 1) {
-    const pi = polygon[i];
-    const pj = polygon[j];
-    const intersects =
-      pi.y > y !== pj.y > y &&
-      x < ((pj.x - pi.x) * (y - pi.y)) / (pj.y - pi.y + Number.EPSILON) + pi.x;
-    if (intersects) inside = !inside;
-  }
-  return inside;
 }
 
 function overlapRatio(a: BoundingBox, b: BoundingBox) {

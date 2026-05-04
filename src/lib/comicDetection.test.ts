@@ -48,7 +48,7 @@ describe("comic panel detection", () => {
     expect(panels).toHaveLength(0);
   });
 
-  it("keeps polygon masks for angled candidates", () => {
+  it("keeps the full panel box while preserving polygon metadata", () => {
     const imageData = createImageDataLike(120, 90, [180, 180, 180, 255]);
     const [panel] = candidatesToItems(
       imageData,
@@ -68,8 +68,25 @@ describe("comic panel detection", () => {
     );
 
     expect(panel.polygon).toHaveLength(4);
-    expect(panel.pixelCount).toBeGreaterThan(0);
-    expect(panel.pixelCount).toBeLessThan(80 * 60);
+    expect(panel.pixelCount).toBe(80 * 60);
+    expect(panel.mask.every((value) => value === 1)).toBe(true);
+  });
+
+  it("preserves white speech bubbles inside detected panels", () => {
+    const imageData = createImageDataLike(180, 120, [255, 255, 255, 255]);
+    fillRect(imageData, 12, 12, 156, 88, [230, 230, 230, 255]);
+    fillRect(imageData, 54, 28, 62, 28, [255, 255, 255, 255]);
+    strokeRect(imageData, 54, 28, 62, 28, [0, 0, 0, 255], 2);
+
+    const panels = detectComicPanelsFallback(imageData, {
+      ...defaultComicDetectionParams,
+      maxPanelAreaRatio: 0.9,
+    });
+    const panel = panels[0];
+    const bubbleX = 60 - panel.boundingBox.x;
+    const bubbleY = 34 - panel.boundingBox.y;
+
+    expect(panel.mask[bubbleY * panel.boundingBox.width + bubbleX]).toBe(1);
   });
 
   it("falls back when OpenCV cannot load", async () => {
