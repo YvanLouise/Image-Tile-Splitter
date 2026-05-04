@@ -1,6 +1,7 @@
 import type {
   BoundingBox,
   NeighborMode,
+  PanelDetectionSource,
   SegmentParams,
   SliceItem,
 } from "../types";
@@ -122,6 +123,8 @@ export function makeRectPanel(
     id,
     order,
     type: "panel",
+    source: "manual",
+    confidence: 1,
   });
 }
 
@@ -155,6 +158,8 @@ export function makePolygonPanel(
     order,
     type: "panel",
     polygon: points,
+    source: "manual",
+    confidence: 1,
   });
 }
 
@@ -201,6 +206,8 @@ export function mergeItems(
     id,
     order,
     type: items.some((item) => item.type === "panel") ? "panel" : "slice",
+    source: items.some((item) => item.type === "panel") ? "manual" : undefined,
+    confidence: items.some((item) => item.type === "panel") ? 1 : undefined,
   });
 }
 
@@ -259,6 +266,8 @@ export function buildSliceItem(
     order: number;
     type: "slice" | "panel";
     polygon?: Array<{ x: number; y: number }>;
+    confidence?: number;
+    source?: PanelDetectionSource;
   },
 ): SliceItem {
   const exportUrl = renderItemUrl(imageData, box, mask);
@@ -272,10 +281,12 @@ export function buildSliceItem(
     exportUrl,
     order: meta.order,
     polygon: meta.polygon,
+    confidence: meta.confidence,
+    source: meta.source,
   };
 }
 
-function connectedComponents(
+export function connectedComponents(
   imageData: ImageData,
   mask: Uint8Array,
   width: number,
@@ -370,6 +381,7 @@ function connectedComponents(
 }
 
 function renderItemUrl(imageData: ImageData, box: BoundingBox, mask: Uint8Array) {
+  if (typeof document === "undefined") return "";
   const canvas = document.createElement("canvas");
   canvas.width = Math.max(1, box.width);
   canvas.height = Math.max(1, box.height);

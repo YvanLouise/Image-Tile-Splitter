@@ -1,20 +1,21 @@
-import { useMemo, useRef, useState } from "react";
+import { useMemo, useReducer, useRef, useState } from "react";
 import { CanvasWorkspace } from "./components/CanvasWorkspace";
 import { LeftPanel } from "./components/LeftPanel";
 import { RightPanel } from "./components/RightPanel";
 import { Toolbar } from "./components/Toolbar";
-import {
-  createAlphaMask,
-  createComicContentMask,
-  detectComicPanels,
-  makePolygonPanel,
-  makeRectPanel,
-  mergeItems,
-  segmentMaskImage,
-  segmentTransparentImage,
-} from "./lib/imageSegmentation";
+import { defaultComicDetectionParams } from "./lib/comicDetection";
 import { exportMetadata, exportSingle, exportZip } from "./lib/exportAssets";
-import type { AppMode, HistoryState, LoadedImage, SegmentParams, SliceItem, ToolMode } from "./types";
+import { makePolygonPanel, makeRectPanel, mergeItems } from "./lib/imageSegmentation";
+import {
+  createInitialSegmentation,
+  detectItems,
+  resegmentEditedMask,
+} from "./lib/segmentationPipeline";
+import {
+  initialSegmentationState,
+  segmentationReducer,
+} from "./state/segmentationReducer";
+import type { AppMode, ComicDetectionParams, SegmentParams, SliceItem, ToolMode } from "./types";
 import { fileToLoadedImage } from "./utils/canvas";
 import "./styles.css";
 
@@ -28,211 +29,246 @@ function App() {
   const fileInputRef = useRef<HTMLInputElement | null>(null);
   const [mode, setMode] = useState<AppMode>("transparent");
   const [tool, setTool] = useState<ToolMode>("select");
-  const [source, setSource] = useState<LoadedImage | null>(null);
   const [params, setParams] = useState<SegmentParams>(defaultParams);
-  const [originalMask, setOriginalMask] = useState<Uint8Array | null>(null);
-  const [edits, setEdits] = useState<Int8Array | null>(null);
-  const [items, setItems] = useState<SliceItem[]>([]);
-  const [selectedIds, setSelectedIds] = useState<number[]>([]);
+  const [comicParams, setComicParams] = useState<ComicDetectionParams>(
+    defaultComicDetectionParams,
+  );
   const [zoom, setZoom] = useState(1);
   const [pan, setPan] = useState({ x: 32, y: 32 });
   const [includeMetadata, setIncludeMetadata] = useState(true);
   const [exportScope, setExportScope] = useState<"selected" | "all">("selected");
-  const [status, setStatus] = useState("等待上传图片");
-  const [undoStack, setUndoStack] = useState<HistoryState[]>([]);
-  const [redoStack, setRedoStack] = useState<HistoryState[]>([]);
+  const [detecting, setDetecting] = useState(false);
+  const [state, dispatch] = useReducer(segmentationReducer, initialSegmentationState);
 
   const selectedItems = useMemo(
-    () => items.filter((item) => selectedIds.includes(item.id)),
-    [items, selectedIds],
+    () => state.items.filter((item) => state.selectedIds.includes(item.id)),
+    [state.items, state.selectedIds],
   );
 
   async function handleFile(file: File) {
     const loaded = await fileToLoadedImage(file);
-    const mask =
-      mode === "transparent"
-        ? createAlphaMask(loaded.imageData, params.alphaThreshold)
-        : createComicContentMask(loaded.imageData);
-    const nextEdits = new Int8Array(loaded.width * loaded.height);
-    const nextItems =
-      mode === "transparent"
-        ? segmentTransparentImage(loaded.imageData, mask, nextEdits, params)
-        : detectComicPanels(loaded.imageData, params);
-    setSource(loaded);
-    setOriginalMask(mask);
-    setEdits(nextEdits);
-    setItems(nextItems);
-    setSelectedIds(nextItems[0] ? [nextItems[0].id] : []);
-    setUndoStack([]);
-    setRedoStack([]);
-    setStatus(`已识别 ${nextItems.length} 个${mode === "transparent" ? "图块" : "漫画格"}`);
-    fitInitialView(loaded);
+    setDetecting(mode === "comic");
+    try {
+      const output = await createInitialSegmentation(loaded, mode, params, comicParams);
+      dispatch({
+        type: "load",
+        source: loaded,
+        originalMask: output.originalMask,
+        edits: output.edits,
+        items: output.items,
+        selectedIds: output.selectedIds,
+        status: output.warning ? `${output.status}；${output.warning}` : output.status,
+      });
+      fitInitialView(loaded.width, loaded.height);
+    } finally {
+      setDetecting(false);
+    }
   }
 
-  function fitInitialView(loaded: LoadedImage) {
-    const scale = Math.min(1, 760 / loaded.width, 560 / loaded.height);
+  function fitInitialView(width: number, height: number) {
+    const scale = Math.min(1, 760 / width, 560 / height);
     setZoom(Math.max(0.08, scale));
     setPan({ x: 36, y: 36 });
   }
 
-  function pushHistory() {
-    if (!edits) return;
-    setUndoStack((stack) => [
-      ...stack,
-      {
-        edits: new Int8Array(edits),
-        items,
-        selectedIds,
-      },
-    ]);
-    setRedoStack([]);
-  }
-
-  function restoreHistory(state: HistoryState) {
-    setEdits(new Int8Array(state.edits));
-    setItems(state.items);
-    setSelectedIds(state.selectedIds);
-  }
-
-  function handleUndo() {
-    const previous = undoStack.at(-1);
-    if (!previous || !edits) return;
-    setRedoStack((stack) => [...stack, { edits: new Int8Array(edits), items, selectedIds }]);
-    setUndoStack((stack) => stack.slice(0, -1));
-    restoreHistory(previous);
-    setStatus("已撤销上一步操作");
-  }
-
-  function handleRedo() {
-    const next = redoStack.at(-1);
-    if (!next || !edits) return;
-    setUndoStack((stack) => [...stack, { edits: new Int8Array(edits), items, selectedIds }]);
-    setRedoStack((stack) => stack.slice(0, -1));
-    restoreHistory(next);
-    setStatus("已重做操作");
-  }
-
-  function resegment(nextEdits = edits, nextMode = mode, nextParams = params) {
-    if (!source || !originalMask || !nextEdits) return;
-    const nextItems =
-      nextMode === "transparent"
-        ? segmentTransparentImage(source.imageData, originalMask, nextEdits, nextParams)
-        : segmentMaskImage(source.imageData, originalMask, nextEdits, nextParams, "panel");
-    setItems(nextItems);
-    setSelectedIds(nextItems[0] ? [nextItems[0].id] : []);
-    setStatus(`已重新分割：${nextItems.length} 个${nextMode === "transparent" ? "图块" : "漫画格"}`);
-  }
-
-  function handleParamsChange(nextParams: SegmentParams) {
-    setParams(nextParams);
-  }
-
-  function handleModeChange(nextMode: AppMode) {
+  async function handleModeChange(nextMode: AppMode) {
     setMode(nextMode);
-    if (!source) return;
-    pushHistory();
-    const mask =
-      nextMode === "transparent"
-        ? createAlphaMask(source.imageData, params.alphaThreshold)
-        : createComicContentMask(source.imageData);
-    const nextEdits = new Int8Array(source.width * source.height);
-    const nextItems =
-      nextMode === "transparent"
-        ? segmentTransparentImage(source.imageData, mask, nextEdits, params)
-        : detectComicPanels(source.imageData, params);
-    setOriginalMask(mask);
-    setEdits(nextEdits);
-    setItems(nextItems);
-    setSelectedIds(nextItems[0] ? [nextItems[0].id] : []);
-    setStatus(`已切换到${nextMode === "transparent" ? "透明图块" : "漫画格"}模式`);
+    if (!state.source) return;
+    setDetecting(nextMode === "comic");
+    try {
+      const output = await createInitialSegmentation(state.source, nextMode, params, comicParams);
+      dispatch({
+        type: "apply",
+        history: true,
+        patch: {
+          originalMask: output.originalMask,
+          edits: output.edits,
+          items: output.items,
+          selectedIds: output.selectedIds,
+          status: output.warning
+            ? `已切换到${nextMode === "transparent" ? "透明图块" : "漫画格"}模式；${output.warning}`
+            : `已切换到${nextMode === "transparent" ? "透明图块" : "漫画格"}模式`,
+        },
+      });
+    } finally {
+      setDetecting(false);
+    }
   }
 
-  function handleSelect(id: number, additive = false) {
-    setSelectedIds((current) => {
-      if (!additive) return [id];
-      return current.includes(id) ? current.filter((itemId) => itemId !== id) : [...current, id];
+  function handleResegment() {
+    if (!state.source || !state.originalMask || !state.edits) return;
+    const result = resegmentEditedMask(
+      state.source,
+      mode,
+      state.originalMask,
+      state.edits,
+      params,
+    );
+    dispatch({
+      type: "apply",
+      patch: {
+        items: result.items,
+        selectedIds: result.selectedIds,
+        status: result.status,
+      },
     });
   }
 
-  function handleSelectAll() {
-    setSelectedIds(items.map((item) => item.id));
+  async function handleAutoDetectComic() {
+    if (!state.source || !state.originalMask || !state.edits) return;
+    setDetecting(true);
+    try {
+      const result = await detectItems(
+        state.source,
+        "comic",
+        state.originalMask,
+        state.edits,
+        params,
+        comicParams,
+      );
+      dispatch({
+        type: "apply",
+        history: true,
+        patch: {
+          items: result.items,
+          selectedIds: result.items[0] ? [result.items[0].id] : [],
+          status: result.warning ? `${result.status}；${result.warning}` : result.status,
+        },
+      });
+    } finally {
+      setDetecting(false);
+    }
   }
 
   function handleMoveOrder(id: number, direction: -1 | 1) {
-    const index = items.findIndex((item) => item.id === id);
+    const index = state.items.findIndex((item) => item.id === id);
     const target = index + direction;
-    if (index < 0 || target < 0 || target >= items.length) return;
-    pushHistory();
-    const next = [...items];
+    if (index < 0 || target < 0 || target >= state.items.length) return;
+    const next = [...state.items];
     [next[index], next[target]] = [next[target], next[index]];
-    setItems(next.map((item, order) => ({ ...item, order })));
+    dispatch({
+      type: "apply",
+      history: true,
+      patch: {
+        items: next.map((item, order) => ({ ...item, order })),
+      },
+    });
   }
 
   function handleMerge() {
-    if (!source || selectedItems.length < 2) return;
-    pushHistory();
-    const merged = mergeItems(source.imageData, selectedItems, nextId(items), Math.min(...selectedItems.map((i) => i.order)));
+    if (!state.source || selectedItems.length < 2) return;
+    const merged = mergeItems(
+      state.source.imageData,
+      selectedItems,
+      nextId(state.items),
+      Math.min(...selectedItems.map((item) => item.order)),
+    );
     if (!merged) return;
-    const selectedSet = new Set(selectedIds);
-    const next = [...items.filter((item) => !selectedSet.has(item.id)), merged]
+    const selectedSet = new Set(state.selectedIds);
+    const next = [...state.items.filter((item) => !selectedSet.has(item.id)), merged]
       .sort((a, b) => a.order - b.order)
       .map((item, order) => ({ ...item, order }));
-    setItems(next);
-    setSelectedIds([merged.id]);
-    setStatus("已合并所选图块");
+    dispatch({
+      type: "apply",
+      history: true,
+      patch: {
+        items: next,
+        selectedIds: [merged.id],
+        status: "已合并所选图块",
+      },
+    });
   }
 
   function handleSplitSelected() {
-    pushHistory();
-    resegment();
+    if (!state.source || !state.originalMask || !state.edits) return;
+    const result = resegmentEditedMask(
+      state.source,
+      mode,
+      state.originalMask,
+      state.edits,
+      params,
+    );
+    dispatch({
+      type: "apply",
+      history: true,
+      patch: {
+        items: result.items,
+        selectedIds: result.selectedIds,
+        status: result.status,
+      },
+    });
   }
 
   function handleMaskEditStart() {
-    pushHistory();
+    dispatch({ type: "apply", history: true, patch: {} });
   }
 
   function handleMaskDraft(nextEdits: Int8Array) {
-    setEdits(nextEdits);
+    dispatch({ type: "draftEdits", edits: nextEdits });
   }
 
   function handleMaskCommit(nextEdits: Int8Array) {
-    setEdits(nextEdits);
-    resegment(nextEdits);
+    if (!state.source || !state.originalMask) return;
+    const result = resegmentEditedMask(state.source, mode, state.originalMask, nextEdits, params);
+    dispatch({
+      type: "apply",
+      patch: {
+        edits: nextEdits,
+        items: result.items,
+        selectedIds: result.selectedIds,
+        status: result.status,
+      },
+    });
   }
 
   function handleRectPanel(box: { x: number; y: number; width: number; height: number }) {
-    if (!source) return;
-    pushHistory();
-    const panel = makeRectPanel(source.imageData, box, nextId(items), items.length);
-    setItems((current) => [...current, panel].map((item, order) => ({ ...item, order })));
-    setSelectedIds([panel.id]);
-    setStatus("已添加手动画框漫画格");
+    if (!state.source) return;
+    const panel = makeRectPanel(state.source.imageData, box, nextId(state.items), state.items.length);
+    dispatch({
+      type: "apply",
+      history: true,
+      patch: {
+        items: [...state.items, panel].map((item, order) => ({ ...item, order })),
+        selectedIds: [panel.id],
+        status: "已添加手动画框漫画格",
+      },
+    });
   }
 
   function handlePolygonPanel(points: Array<{ x: number; y: number }>) {
-    if (!source) return;
-    pushHistory();
-    const panel = makePolygonPanel(source.imageData, points, nextId(items), items.length);
-    setItems((current) => [...current, panel].map((item, order) => ({ ...item, order })));
-    setSelectedIds([panel.id]);
-    setStatus("已添加多边形漫画格");
+    if (!state.source) return;
+    const panel = makePolygonPanel(
+      state.source.imageData,
+      points,
+      nextId(state.items),
+      state.items.length,
+    );
+    dispatch({
+      type: "apply",
+      history: true,
+      patch: {
+        items: [...state.items, panel].map((item, order) => ({ ...item, order })),
+        selectedIds: [panel.id],
+        status: "已添加多边形漫画格",
+      },
+    });
   }
 
   function handleExportCurrent() {
-    const targets = exportScope === "all" ? items : selectedItems;
+    const targets = exportScope === "all" ? state.items : selectedItems;
     if (targets.length === 1) exportSingle(targets[0]);
-    else if (source && targets.length > 1) void exportZip(source, targets, includeMetadata);
+    else if (state.source && targets.length > 1) void exportZip(state.source, targets, includeMetadata);
   }
 
   function handleExportZip() {
-    if (!source) return;
-    const targets = exportScope === "all" ? items : selectedItems;
-    void exportZip(source, targets, includeMetadata);
+    if (!state.source) return;
+    const targets = exportScope === "all" ? state.items : selectedItems;
+    void exportZip(state.source, targets, includeMetadata);
   }
 
   function handleExportMetadata() {
-    if (!source) return;
-    exportMetadata(source, items);
+    if (!state.source) return;
+    exportMetadata(state.source, state.items);
   }
 
   return (
@@ -251,42 +287,45 @@ function App() {
       <Toolbar
         mode={mode}
         tool={tool}
-        canUndo={undoStack.length > 0}
-        canRedo={redoStack.length > 0}
-        onModeChange={handleModeChange}
+        canUndo={state.undoStack.length > 0}
+        canRedo={state.redoStack.length > 0}
+        onModeChange={(nextMode) => void handleModeChange(nextMode)}
         onToolChange={setTool}
         onUploadClick={() => fileInputRef.current?.click()}
-        onUndo={handleUndo}
-        onRedo={handleRedo}
+        onUndo={() => dispatch({ type: "undo" })}
+        onRedo={() => dispatch({ type: "redo" })}
       />
       <div className="workspace">
         <LeftPanel
           mode={mode}
-          source={source}
+          source={state.source}
           params={params}
-          items={items}
-          selectedIds={selectedIds}
-          includeMetadata={includeMetadata}
-          onParamsChange={handleParamsChange}
+          comicParams={comicParams}
+          items={state.items}
+          selectedIds={state.selectedIds}
+          detecting={detecting}
+          onParamsChange={setParams}
+          onComicParamsChange={setComicParams}
           onFileChange={(file) => void handleFile(file)}
-          onResegment={() => resegment()}
-          onSelect={handleSelect}
-          onSelectAll={handleSelectAll}
+          onResegment={handleResegment}
+          onAutoDetectComic={() => void handleAutoDetectComic()}
+          onSelect={(id, additive) => dispatch({ type: "select", id, additive })}
+          onSelectAll={() => dispatch({ type: "selectAll" })}
           onMoveOrder={handleMoveOrder}
           onMerge={handleMerge}
           onSplitSelected={handleSplitSelected}
         />
         <CanvasWorkspace
-          source={source}
-          items={items}
-          selectedIds={selectedIds}
-          edits={edits}
+          source={state.source}
+          items={state.items}
+          selectedIds={state.selectedIds}
+          edits={state.edits}
           tool={tool}
           zoom={zoom}
           pan={pan}
           onZoomChange={setZoom}
           onPanChange={setPan}
-          onSelect={handleSelect}
+          onSelect={(id, additive) => dispatch({ type: "select", id, additive })}
           onMaskEditStart={handleMaskEditStart}
           onMaskDraft={handleMaskDraft}
           onMaskCommit={handleMaskCommit}
@@ -294,9 +333,9 @@ function App() {
           onPolygonPanel={handlePolygonPanel}
         />
         <RightPanel
-          source={source}
+          source={state.source}
           selectedItems={selectedItems}
-          allItems={items}
+          allItems={state.items}
           zoom={zoom}
           includeMetadata={includeMetadata}
           exportScope={exportScope}
@@ -309,9 +348,9 @@ function App() {
         />
       </div>
       <footer className="status-bar">
-        <span>{status}</span>
+        <span>{detecting ? "正在加载 OpenCV 并检测漫画格..." : state.status}</span>
         <span>缩放比例：{Math.round(zoom * 100)}%</span>
-        <span>已选中 {selectedIds.length} 个</span>
+        <span>已选中 {state.selectedIds.length} 个</span>
         <span>纯前端处理，所有操作在本地完成</span>
       </footer>
     </div>

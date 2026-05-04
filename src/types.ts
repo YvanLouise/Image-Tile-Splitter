@@ -22,6 +22,18 @@ export interface SegmentParams {
   minPixels: number;
 }
 
+export interface ComicDetectionParams {
+  gutterSensitivity: number;
+  borderSensitivity: number;
+  minPanelAreaRatio: number;
+  maxPanelAreaRatio: number;
+  approxEpsilonRatio: number;
+  mergeNearbyPanels: boolean;
+  showConfidence: boolean;
+}
+
+export type PanelDetectionSource = "opencv" | "manual" | "fallback";
+
 export interface SliceItem {
   id: number;
   type: "slice" | "panel";
@@ -32,6 +44,8 @@ export interface SliceItem {
   exportUrl: string;
   order: number;
   polygon?: Array<{ x: number; y: number }>;
+  confidence?: number;
+  source?: PanelDetectionSource;
 }
 
 export interface LoadedImage {

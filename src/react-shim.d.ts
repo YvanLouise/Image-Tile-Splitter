@@ -27,6 +27,11 @@ declare module "react" {
 
   export function useRef<T>(initialValue: T): { current: T };
 
+  export function useReducer<R extends (state: any, action: any) => any, I>(
+    reducer: R,
+    initialArg: I,
+  ): [I, (action: Parameters<R>[1]) => void];
+
   export function useState<T>(
     initialValue: T | (() => T),
   ): [T, (value: T | ((previous: T) => T)) => void];
@@ -44,4 +49,9 @@ declare module "react/jsx-runtime" {
   export const Fragment: any;
   export const jsx: any;
   export const jsxs: any;
+}
+
+declare module "opencv.js" {
+  const cv: any;
+  export default cv;
 }

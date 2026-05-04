@@ -1,17 +1,35 @@
-import { ArrowDownAZ, Combine, Filter, ImageUp, ListChecks, RotateCcw, Scissors } from "lucide-react";
-import type { AppMode, LoadedImage, SegmentParams, SliceItem } from "../types";
+import {
+  ArrowDownAZ,
+  Combine,
+  Filter,
+  ImageUp,
+  ListChecks,
+  RotateCcw,
+  Scissors,
+  ScanSearch,
+} from "lucide-react";
+import type {
+  AppMode,
+  ComicDetectionParams,
+  LoadedImage,
+  SegmentParams,
+  SliceItem,
+} from "../types";
 import { formatBytes } from "../utils/canvas";
 
 interface LeftPanelProps {
   mode: AppMode;
   source: LoadedImage | null;
   params: SegmentParams;
+  comicParams: ComicDetectionParams;
   items: SliceItem[];
   selectedIds: number[];
-  includeMetadata: boolean;
+  detecting: boolean;
   onParamsChange: (params: SegmentParams) => void;
+  onComicParamsChange: (params: ComicDetectionParams) => void;
   onFileChange: (file: File) => void;
   onResegment: () => void;
+  onAutoDetectComic: () => void;
   onSelect: (id: number, additive?: boolean) => void;
   onSelectAll: () => void;
   onMoveOrder: (id: number, direction: -1 | 1) => void;
@@ -23,11 +41,15 @@ export function LeftPanel({
   mode,
   source,
   params,
+  comicParams,
   items,
   selectedIds,
+  detecting,
   onParamsChange,
+  onComicParamsChange,
   onFileChange,
   onResegment,
+  onAutoDetectComic,
   onSelect,
   onSelectAll,
   onMoveOrder,
@@ -68,45 +90,134 @@ export function LeftPanel({
 
       <section className="panel-section">
         <h2>2. 分割设置</h2>
-        <div className="control-row">
-          <label>Alpha 阈值</label>
-          <input
-            type="range"
-            min="0"
-            max="255"
-            value={params.alphaThreshold}
-            onChange={(e) =>
-              onParamsChange({ ...params, alphaThreshold: Number(e.target.value) })
-            }
-          />
-          <input
-            className="numeric"
-            type="number"
-            min="0"
-            max="255"
-            value={params.alphaThreshold}
-            onChange={(e) =>
-              onParamsChange({ ...params, alphaThreshold: Number(e.target.value) })
-            }
-          />
-        </div>
-        <div className="control-row">
-          <label>连通规则</label>
-          <div className="segmented">
-            <button
-              className={params.neighborMode === 4 ? "active" : ""}
-              onClick={() => onParamsChange({ ...params, neighborMode: 4 })}
-            >
-              4 邻域
-            </button>
-            <button
-              className={params.neighborMode === 8 ? "active" : ""}
-              onClick={() => onParamsChange({ ...params, neighborMode: 8 })}
-            >
-              8 邻域
-            </button>
-          </div>
-        </div>
+        {mode === "transparent" ? (
+          <>
+            <div className="control-row">
+              <label>Alpha 阈值</label>
+              <input
+                type="range"
+                min="0"
+                max="255"
+                value={params.alphaThreshold}
+                onChange={(e) =>
+                  onParamsChange({ ...params, alphaThreshold: Number(e.target.value) })
+                }
+              />
+              <input
+                className="numeric"
+                type="number"
+                min="0"
+                max="255"
+                value={params.alphaThreshold}
+                onChange={(e) =>
+                  onParamsChange({ ...params, alphaThreshold: Number(e.target.value) })
+                }
+              />
+            </div>
+            <div className="control-row">
+              <label>连通规则</label>
+              <div className="segmented">
+                <button
+                  className={params.neighborMode === 4 ? "active" : ""}
+                  onClick={() => onParamsChange({ ...params, neighborMode: 4 })}
+                >
+                  4 邻域
+                </button>
+                <button
+                  className={params.neighborMode === 8 ? "active" : ""}
+                  onClick={() => onParamsChange({ ...params, neighborMode: 8 })}
+                >
+                  8 邻域
+                </button>
+              </div>
+            </div>
+          </>
+        ) : (
+          <>
+            <div className="control-row">
+              <label>留白强度</label>
+              <input
+                type="range"
+                min="0"
+                max="100"
+                value={comicParams.gutterSensitivity}
+                onChange={(e) =>
+                  onComicParamsChange({
+                    ...comicParams,
+                    gutterSensitivity: Number(e.target.value),
+                  })
+                }
+              />
+              <input
+                className="numeric"
+                type="number"
+                min="0"
+                max="100"
+                value={comicParams.gutterSensitivity}
+                onChange={(e) =>
+                  onComicParamsChange({
+                    ...comicParams,
+                    gutterSensitivity: Number(e.target.value),
+                  })
+                }
+              />
+            </div>
+            <div className="control-row">
+              <label>边框强度</label>
+              <input
+                type="range"
+                min="0"
+                max="100"
+                value={comicParams.borderSensitivity}
+                onChange={(e) =>
+                  onComicParamsChange({
+                    ...comicParams,
+                    borderSensitivity: Number(e.target.value),
+                  })
+                }
+              />
+              <input
+                className="numeric"
+                type="number"
+                min="0"
+                max="100"
+                value={comicParams.borderSensitivity}
+                onChange={(e) =>
+                  onComicParamsChange({
+                    ...comicParams,
+                    borderSensitivity: Number(e.target.value),
+                  })
+                }
+              />
+            </div>
+            <label className="checkbox-line compact">
+              <input
+                type="checkbox"
+                checked={comicParams.mergeNearbyPanels}
+                onChange={(event) =>
+                  onComicParamsChange({
+                    ...comicParams,
+                    mergeNearbyPanels: event.target.checked,
+                  })
+                }
+              />
+              合并相近候选
+            </label>
+            <label className="checkbox-line compact">
+              <input
+                type="checkbox"
+                checked={comicParams.showConfidence}
+                onChange={(event) =>
+                  onComicParamsChange({
+                    ...comicParams,
+                    showConfidence: event.target.checked,
+                  })
+                }
+              />
+              显示候选置信度
+            </label>
+          </>
+        )}
         <div className="control-row">
           <label>最小像素数</label>
           <input
@@ -127,12 +238,19 @@ export function LeftPanel({
         <div className="mode-note">
           {mode === "transparent"
             ? "透明模式按 alpha 通道分离，1px 粘连会保留为同一块。"
-            : "漫画格模式使用基础灰度检测，建议配合矩形和多边形手动修正。"}
+            : "漫画模式优先使用 OpenCV 检测整页漫画的留白和边框；失败时自动回退基础规则。"}
         </div>
-        <button className="primary wide" onClick={onResegment} disabled={!source}>
-          <RotateCcw size={16} />
-          重新分割
-        </button>
+        {mode === "comic" ? (
+          <button className="primary wide" onClick={onAutoDetectComic} disabled={!source || detecting}>
+            <ScanSearch size={16} />
+            {detecting ? "检测中..." : "自动检测（OpenCV）"}
+          </button>
+        ) : (
+          <button className="primary wide" onClick={onResegment} disabled={!source}>
+            <RotateCcw size={16} />
+            重新分割
+          </button>
+        )}
       </section>
 
       <section className="panel-section grow">
@@ -170,11 +288,19 @@ export function LeftPanel({
                 onClick={(event) => onSelect(item.id, event.ctrlKey || event.metaKey)}
               >
                 <img src={item.previewUrl} alt="" />
-                <strong>#{item.order + 1}</strong>
+                <strong>
+                  #{item.order + 1}
+                  {mode === "comic" && comicParams.showConfidence && item.confidence != null
+                    ? ` · ${Math.round(item.confidence * 100)}%`
+                    : ""}
+                </strong>
                 <span>
                   {item.boundingBox.width}×{item.boundingBox.height}
                 </span>
-                <small>{item.pixelCount.toLocaleString()} px</small>
+                <small>
+                  {item.pixelCount.toLocaleString()} px
+                  {item.source ? ` · ${item.source}` : ""}
+                </small>
                 <div className="order-buttons">
                   <button
                     type="button"

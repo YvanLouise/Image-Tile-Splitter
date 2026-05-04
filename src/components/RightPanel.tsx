@@ -45,6 +45,14 @@ export function RightPanel({
                 {selected.boundingBox.width} × {selected.boundingBox.height} px，
                 {selected.pixelCount.toLocaleString()} 像素
               </span>
+              {selected.source && (
+                <span>
+                  来源：{selected.source}
+                  {selected.confidence != null
+                    ? `，置信度 ${Math.round(selected.confidence * 100)}%`
+                    : ""}
+                </span>
+              )}
             </div>
             <div className="preview-frame">
               <img src={selected.previewUrl} alt="" />

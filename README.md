@@ -7,6 +7,7 @@
 - 上传 PNG / WebP / JPG。
 - 透明图块模式：按 alpha 通道执行 connected components 分割。
 - 漫画格模式：基础灰度阈值检测，并支持手动画框和多边形格子。
+- 漫画格模式增强：优先懒加载 OpenCV.js 识别整页漫画的留白和边框；OpenCV 不可用时自动回退基础规则。
 - 支持 4 邻域 / 8 邻域、Alpha 阈值、最小像素数。
 - 中央 Canvas 显示棋盘格透明背景、原图、bounding box、选中高亮。
 - 支持缩放、拖拽、点击选择、多选、排序。
@@ -23,6 +24,16 @@
   - 单个 PNG。
   - 批量 ZIP。
   - metadata.json。
+
+## OpenCV.js
+
+项目使用 npm 版 OpenCV.js，并在 `postinstall` 阶段把运行时文件复制到 `public/opencv.js`。漫画格模式会在点击“自动检测（OpenCV）”时再加载该文件；如果文件不存在或加载失败，应用会自动使用 fallback 检测，不影响透明图块分割。
+
+如果刚拉取项目后没有 `public/opencv.js`，运行：
+
+```bash
+npm install
+```
 
 ## 安装与运行
 
@@ -78,6 +89,8 @@ https://yvanlouise.github.io/Image-Tile-Splitter/
 
 核心算法在 `src/lib/imageSegmentation.ts`。
 
+漫画格检测在 `src/lib/comicDetection.ts`，OpenCV 加载隔离在 `src/lib/opencvLoader.ts`，上传/检测/重新分割的编排在 `src/lib/segmentationPipeline.ts`。
+
 透明图块模式使用以下流程：
 
 1. 通过 Canvas 获取 `ImageData`。
@@ -110,6 +123,11 @@ src/
   lib/
     imageSegmentation.ts          mask、连通域、手动 panel、合并
     exportAssets.ts               PNG / ZIP / metadata 导出
+    comicDetection.ts             OpenCV + fallback 漫画格检测
+    opencvLoader.ts               OpenCV.js 懒加载
+    segmentationPipeline.ts        上传、检测、重分割编排
+  state/
+    segmentationReducer.ts         分割状态、选择、撤销重做
   utils/
     canvas.ts                     图片加载、下载、棋盘格、命中测试
 ```

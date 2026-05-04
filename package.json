@@ -6,6 +6,8 @@
   "scripts": {
     "dev": "vite --host 127.0.0.1",
     "build": "tsc --noEmit && vite build",
+    "test": "vitest run",
+    "postinstall": "node scripts/copy-opencv.mjs",
     "prepare:github": "node scripts/prepare-github-pages.mjs",
     "preview": "vite preview --host 127.0.0.1",
     "serve:dist": "node scripts/serve-dist.mjs",
@@ -16,11 +18,13 @@
     "@vitejs/plugin-react": "^5.0.0",
     "jszip": "^3.10.1",
     "lucide-react": "^0.468.0",
+    "opencv.js": "^1.2.1",
     "vite": "^6.0.0",
     "react": "^19.0.0",
     "react-dom": "^19.0.0"
   },
   "devDependencies": {
-    "typescript": "^5.7.2"
+    "typescript": "^5.7.2",
+    "vitest": "^2.1.8"
   }
 }

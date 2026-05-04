@@ -1,5 +1,6 @@
 node_modules/
 dist/
+public/opencv.js
 .env
 .env.*
 *.log
