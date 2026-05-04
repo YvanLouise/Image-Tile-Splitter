@@ -297,7 +297,17 @@ function drawBoxes(
     ctx.strokeStyle = selected ? "#2563eb" : "#22c55e";
     ctx.fillStyle = selected ? "#2563eb" : "#22c55e";
     ctx.setLineDash(selected ? [] : [6, 5]);
-    ctx.strokeRect(box.x - 2, box.y - 2, box.width + 4, box.height + 4);
+    if (item.polygon && item.polygon.length >= 3) {
+      ctx.beginPath();
+      item.polygon.forEach((point, index) => {
+        if (index === 0) ctx.moveTo(point.x, point.y);
+        else ctx.lineTo(point.x, point.y);
+      });
+      ctx.closePath();
+      ctx.stroke();
+    } else {
+      ctx.strokeRect(box.x - 2, box.y - 2, box.width + 4, box.height + 4);
+    }
     ctx.setLineDash([]);
     ctx.beginPath();
     ctx.roundRect(box.x - 6, box.y - 18, 20, 20, 5);

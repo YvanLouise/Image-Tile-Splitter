@@ -162,8 +162,22 @@ export function candidatesToItems(
   return sortReadingOrder(candidates)
     .map((candidate, index) => {
       const mask = new Uint8Array(candidate.box.width * candidate.box.height);
-      mask.fill(1);
-      const pixelCount = candidate.box.width * candidate.box.height;
+      let pixelCount = 0;
+      const usePolygonMask = shouldUsePolygonMask(candidate);
+      if (!usePolygonMask) {
+        mask.fill(1);
+        pixelCount = candidate.box.width * candidate.box.height;
+      } else {
+        for (let y = 0; y < candidate.box.height; y += 1) {
+          for (let x = 0; x < candidate.box.width; x += 1) {
+            const imageX = candidate.box.x + x;
+            const imageY = candidate.box.y + y;
+            if (!pointInPolygon(imageX + 0.5, imageY + 0.5, candidate.polygon!)) continue;
+            mask[y * candidate.box.width + x] = 1;
+            pixelCount += 1;
+          }
+        }
+      }
       return buildSliceItem(imageData, candidate.box, mask, pixelCount, {
         id: index + 1,
         order: index,
@@ -314,6 +328,41 @@ function matToPolygon(mat: any): Array<{ x: number; y: number }> | undefined {
     polygon.push({ x: mat.data32S[i], y: mat.data32S[i + 1] });
   }
   return polygon.length >= 3 ? polygon : undefined;
+}
+
+function shouldUsePolygonMask(candidate: PanelCandidate) {
+  if (!candidate.polygon || candidate.polygon.length < 3) return false;
+  const polygonAreaValue = polygonArea(candidate.polygon);
+  const boxArea = area(candidate.box);
+  if (polygonAreaValue <= 0 || boxArea <= 0) return false;
+  const coverage = polygonAreaValue / boxArea;
+  if (coverage > 0.96) return false;
+  return candidate.polygon.length !== 4 || coverage < 0.9;
+}
+
+function pointInPolygon(
+  x: number,
+  y: number,
+  polygon: Array<{ x: number; y: number }>,
+) {
+  let inside = false;
+  for (let i = 0, j = polygon.length - 1; i < polygon.length; j = i, i += 1) {
+    const pi = polygon[i];
+    const pj = polygon[j];
+    const intersects =
+      pi.y > y !== pj.y > y &&
+      x < ((pj.x - pi.x) * (y - pi.y)) / (pj.y - pi.y + Number.EPSILON) + pi.x;
+    if (intersects) inside = !inside;
+  }
+  return inside;
+}
+
+function polygonArea(polygon: Array<{ x: number; y: number }>) {
+  let sum = 0;
+  for (let i = 0, j = polygon.length - 1; i < polygon.length; j = i, i += 1) {
+    sum += (polygon[j].x + polygon[i].x) * (polygon[j].y - polygon[i].y);
+  }
+  return Math.abs(sum / 2);
 }
 
 function overlapRatio(a: BoundingBox, b: BoundingBox) {

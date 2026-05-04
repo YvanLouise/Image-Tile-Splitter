@@ -48,7 +48,7 @@ describe("comic panel detection", () => {
     expect(panels).toHaveLength(0);
   });
 
-  it("keeps the full panel box while preserving polygon metadata", () => {
+  it("uses polygon masks for irregular candidates", () => {
     const imageData = createImageDataLike(120, 90, [180, 180, 180, 255]);
     const [panel] = candidatesToItems(
       imageData,
@@ -68,6 +68,30 @@ describe("comic panel detection", () => {
     );
 
     expect(panel.polygon).toHaveLength(4);
+    expect(panel.pixelCount).toBeGreaterThan(0);
+    expect(panel.pixelCount).toBeLessThan(80 * 60);
+    expect(panel.mask.some((value) => value === 0)).toBe(true);
+  });
+
+  it("keeps rectangular polygon candidates as full panels", () => {
+    const imageData = createImageDataLike(120, 90, [180, 180, 180, 255]);
+    const [panel] = candidatesToItems(
+      imageData,
+      [
+        {
+          box: { x: 10, y: 10, width: 80, height: 60 },
+          polygon: [
+            { x: 10, y: 10 },
+            { x: 90, y: 10 },
+            { x: 90, y: 70 },
+            { x: 10, y: 70 },
+          ],
+          confidence: 0.8,
+        },
+      ],
+      "opencv",
+    );
+
     expect(panel.pixelCount).toBe(80 * 60);
     expect(panel.mask.every((value) => value === 1)).toBe(true);
   });
