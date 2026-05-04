@@ -9,7 +9,8 @@
     "prepare:github": "node scripts/prepare-github-pages.mjs",
     "preview": "vite preview --host 127.0.0.1",
     "serve:dist": "node scripts/serve-dist.mjs",
-    "open": "open-web.cmd"
+    "open": "open-web.cmd",
+    "push": "push-github.cmd"
   },
   "dependencies": {
     "@vitejs/plugin-react": "^5.0.0",

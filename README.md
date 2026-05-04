@@ -46,6 +46,18 @@ npm run serve:dist -- --port 4173
 
 Windows 下也可以直接双击 `open-web.cmd`，它会自动构建、启动本地服务并打开浏览器。
 
+一键推送到 GitHub：
+
+```bash
+push-github.cmd
+```
+
+也可以带提交信息：
+
+```bash
+push-github.cmd "Update UI and deployment"
+```
+
 ## GitHub Pages 上线
 
 本项目已包含 GitHub Pages Actions 工作流。推送到 `main` 后，GitHub 会自动构建并发布 `dist`。
