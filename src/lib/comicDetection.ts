@@ -20,6 +20,7 @@ export interface ComicDetectionResult {
 
 interface PanelCandidate {
   box: BoundingBox;
+  mask?: Uint8Array;
   polygon?: Array<{ x: number; y: number }>;
   confidence: number;
 }
@@ -30,9 +31,13 @@ export async function detectComicPanelsAdvanced(
 ): Promise<ComicDetectionResult> {
   try {
     const items = await detectComicPanelsWithOpenCv(imageData, params);
+    const fallbackItems = detectComicPanelsFallback(imageData, params);
+    if (hasIrregularMasks(fallbackItems) && fallbackItems.length >= Math.max(2, items.length)) {
+      return { items: fallbackItems, engine: "fallback" };
+    }
     if (items.length > 0) return { items, engine: "opencv" };
     return {
-      items: detectComicPanelsFallback(imageData, params),
+      items: fallbackItems,
       engine: "fallback",
       warning: "OpenCV 未找到稳定漫画格，已使用基础规则检测。",
     };
@@ -124,6 +129,9 @@ export function detectComicPanelsFallback(
   imageData: ImageData,
   params: ComicDetectionParams,
 ): SliceItem[] {
+  const gutterItems = detectPanelsByBorderConnectedGutters(imageData, params);
+  if (gutterItems.length > 0) return gutterItems;
+
   const candidates = detectPanelsByWhitespace(imageData, params);
   if (candidates.length > 0) {
     return candidatesToItems(imageData, candidates, "fallback");
@@ -164,7 +172,12 @@ export function candidatesToItems(
       const mask = new Uint8Array(candidate.box.width * candidate.box.height);
       let pixelCount = 0;
       const usePolygonMask = shouldUsePolygonMask(candidate);
-      if (!usePolygonMask) {
+      if (candidate.mask) {
+        mask.set(candidate.mask);
+        for (const value of mask) {
+          if (value) pixelCount += 1;
+        }
+      } else if (!usePolygonMask) {
         mask.fill(1);
         pixelCount = candidate.box.width * candidate.box.height;
       } else {
@@ -187,6 +200,86 @@ export function candidatesToItems(
         source,
       });
     });
+}
+
+function detectPanelsByBorderConnectedGutters(
+  imageData: ImageData,
+  params: ComicDetectionParams,
+): SliceItem[] {
+  const width = imageData.width;
+  const height = imageData.height;
+  const pageArea = width * height;
+  const whiteThreshold = 205 + params.gutterSensitivity * 0.45;
+  const externalGutter = floodFillExternalGutters(imageData, whiteThreshold);
+  const panelMask = new Uint8Array(pageArea);
+
+  for (let i = 0; i < pageArea; i += 1) {
+    panelMask[i] = externalGutter[i] ? 0 : 1;
+  }
+
+  const rawItems = connectedComponents(
+    imageData,
+    panelMask,
+    width,
+    height,
+    8,
+    Math.max(20, Math.floor(pageArea * params.minPanelAreaRatio)),
+    "panel",
+  );
+
+  return rawItems
+    .filter((item) => isPanelBox(item.boundingBox, pageArea, params))
+    .filter((item) => estimateContentScore(imageData, item.boundingBox, whiteThreshold) >= 0.005)
+    .slice(0, 80)
+    .sort((a, b) => a.boundingBox.y - b.boundingBox.y || a.boundingBox.x - b.boundingBox.x)
+    .map((item, index) => ({
+      ...item,
+      id: index + 1,
+      order: index,
+      source: "fallback" as const,
+      confidence: irregularityScore(item) > 0.05 ? 0.72 : 0.62,
+    }));
+}
+
+function floodFillExternalGutters(imageData: ImageData, whiteThreshold: number) {
+  const width = imageData.width;
+  const height = imageData.height;
+  const data = imageData.data;
+  const visited = new Uint8Array(width * height);
+  const queue = new Int32Array(width * height);
+  let head = 0;
+  let tail = 0;
+
+  const enqueue = (x: number, y: number) => {
+    if (x < 0 || x >= width || y < 0 || y >= height) return;
+    const idx = y * width + x;
+    if (visited[idx] || !isGutterPixel(data, idx, whiteThreshold)) return;
+    visited[idx] = 1;
+    queue[tail] = idx;
+    tail += 1;
+  };
+
+  for (let x = 0; x < width; x += 1) {
+    enqueue(x, 0);
+    enqueue(x, height - 1);
+  }
+  for (let y = 0; y < height; y += 1) {
+    enqueue(0, y);
+    enqueue(width - 1, y);
+  }
+
+  while (head < tail) {
+    const idx = queue[head];
+    head += 1;
+    const x = idx % width;
+    const y = Math.floor(idx / width);
+    enqueue(x + 1, y);
+    enqueue(x - 1, y);
+    enqueue(x, y + 1);
+    enqueue(x, y - 1);
+  }
+
+  return visited;
 }
 
 function detectPanelsByWhitespace(
@@ -363,6 +456,16 @@ function polygonArea(polygon: Array<{ x: number; y: number }>) {
     sum += (polygon[j].x + polygon[i].x) * (polygon[j].y - polygon[i].y);
   }
   return Math.abs(sum / 2);
+}
+
+function hasIrregularMasks(items: SliceItem[]) {
+  return items.some((item) => irregularityScore(item) > 0.05);
+}
+
+function irregularityScore(item: Pick<SliceItem, "boundingBox" | "pixelCount">) {
+  const boxArea = area(item.boundingBox);
+  if (boxArea <= 0) return 0;
+  return 1 - item.pixelCount / boxArea;
 }
 
 function overlapRatio(a: BoundingBox, b: BoundingBox) {

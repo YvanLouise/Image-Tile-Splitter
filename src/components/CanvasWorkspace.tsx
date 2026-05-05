@@ -305,6 +305,8 @@ function drawBoxes(
       });
       ctx.closePath();
       ctx.stroke();
+    } else if (isIrregularMask(item)) {
+      drawMaskBoundary(ctx, item);
     } else {
       ctx.strokeRect(box.x - 2, box.y - 2, box.width + 4, box.height + 4);
     }
@@ -317,6 +319,34 @@ function drawBoxes(
     ctx.textBaseline = "middle";
     ctx.fillText(String(item.order + 1), box.x + 4, box.y - 8);
   }
+}
+
+function isIrregularMask(item: SliceItem) {
+  const boxArea = item.boundingBox.width * item.boundingBox.height;
+  if (boxArea <= 0) return false;
+  return 1 - item.pixelCount / boxArea > 0.03;
+}
+
+function drawMaskBoundary(ctx: CanvasRenderingContext2D, item: SliceItem) {
+  const box = item.boundingBox;
+  ctx.beginPath();
+  for (let y = 0; y < box.height; y += 1) {
+    for (let x = 0; x < box.width; x += 1) {
+      const idx = y * box.width + x;
+      if (!item.mask[idx]) continue;
+      const touchesOutside =
+        x === 0 ||
+        y === 0 ||
+        x === box.width - 1 ||
+        y === box.height - 1 ||
+        !item.mask[idx - 1] ||
+        !item.mask[idx + 1] ||
+        !item.mask[idx - box.width] ||
+        !item.mask[idx + box.width];
+      if (touchesOutside) ctx.rect(box.x + x, box.y + y, 1, 1);
+    }
+  }
+  ctx.stroke();
 }
 
 function drawMaskEdits(

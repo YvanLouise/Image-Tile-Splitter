@@ -73,6 +73,36 @@ describe("comic panel detection", () => {
     expect(panel.mask.some((value) => value === 0)).toBe(true);
   });
 
+  it("splits irregular panels separated by border-connected white gutters", () => {
+    const imageData = createImageDataLike(180, 120, [255, 255, 255, 255]);
+    fillPolygon(
+      imageData,
+      [
+        { x: 12, y: 12 },
+        { x: 92, y: 12 },
+        { x: 72, y: 108 },
+        { x: 12, y: 108 },
+      ],
+      [210, 210, 210, 255],
+    );
+    fillPolygon(
+      imageData,
+      [
+        { x: 108, y: 12 },
+        { x: 168, y: 12 },
+        { x: 168, y: 108 },
+        { x: 88, y: 108 },
+      ],
+      [205, 205, 205, 255],
+    );
+
+    const panels = detectComicPanelsFallback(imageData, defaultComicDetectionParams);
+
+    expect(panels).toHaveLength(2);
+    expect(panels.some((panel) => panel.mask.some((value) => value === 0))).toBe(true);
+    expect(panels.every((panel) => panel.pixelCount < panel.boundingBox.width * panel.boundingBox.height)).toBe(true);
+  });
+
   it("keeps rectangular polygon candidates as full panels", () => {
     const imageData = createImageDataLike(120, 90, [180, 180, 180, 255]);
     const [panel] = candidatesToItems(
@@ -188,6 +218,39 @@ function strokeRect(
   fillRect(imageData, x, y + height - thickness, width, thickness, color);
   fillRect(imageData, x, y, thickness, height, color);
   fillRect(imageData, x + width - thickness, y, thickness, height, color);
+}
+
+function fillPolygon(
+  imageData: ImageData,
+  points: Array<{ x: number; y: number }>,
+  color: [number, number, number, number],
+) {
+  const minX = Math.floor(Math.min(...points.map((point) => point.x)));
+  const maxX = Math.ceil(Math.max(...points.map((point) => point.x)));
+  const minY = Math.floor(Math.min(...points.map((point) => point.y)));
+  const maxY = Math.ceil(Math.max(...points.map((point) => point.y)));
+  for (let y = minY; y <= maxY; y += 1) {
+    for (let x = minX; x <= maxX; x += 1) {
+      if (pointInPolygon(x + 0.5, y + 0.5, points)) setPixel(imageData, x, y, color);
+    }
+  }
+}
+
+function pointInPolygon(
+  x: number,
+  y: number,
+  polygon: Array<{ x: number; y: number }>,
+) {
+  let inside = false;
+  for (let i = 0, j = polygon.length - 1; i < polygon.length; j = i, i += 1) {
+    const pi = polygon[i];
+    const pj = polygon[j];
+    const intersects =
+      pi.y > y !== pj.y > y &&
+      x < ((pj.x - pi.x) * (y - pi.y)) / (pj.y - pi.y + Number.EPSILON) + pi.x;
+    if (intersects) inside = !inside;
+  }
+  return inside;
 }
 
 function setPixel(
