@@ -1,8 +1,10 @@
-import { useMemo, useReducer, useRef, useState } from "react";
+import { useEffect, useMemo, useReducer, useRef, useState } from "react";
 import { CanvasWorkspace } from "./components/CanvasWorkspace";
+import { HelpModal } from "./components/HelpModal";
 import { LeftPanel } from "./components/LeftPanel";
 import { RightPanel } from "./components/RightPanel";
 import { Toolbar } from "./components/Toolbar";
+import { translations } from "./i18n";
 import { defaultComicDetectionParams } from "./lib/comicDetection";
 import { exportMetadata, exportSingle, exportZip } from "./lib/exportAssets";
 import { makePolygonPanel, makeRectPanel, mergeItems } from "./lib/imageSegmentation";
@@ -15,6 +17,7 @@ import {
   initialSegmentationState,
   segmentationReducer,
 } from "./state/segmentationReducer";
+import type { Language, ThemeMode } from "./i18n";
 import type { AppMode, ComicDetectionParams, SegmentParams, SliceItem, ToolMode } from "./types";
 import { fileToLoadedImage } from "./utils/canvas";
 import "./styles.css";
@@ -27,6 +30,13 @@ const defaultParams: SegmentParams = {
 
 function App() {
   const fileInputRef = useRef<HTMLInputElement | null>(null);
+  const [language, setLanguage] = useState<Language>(() =>
+    readPreference("language", "zh", ["zh", "en"]),
+  );
+  const [theme, setTheme] = useState<ThemeMode>(() =>
+    readPreference("theme", "light", ["light", "dark"]),
+  );
+  const [helpOpen, setHelpOpen] = useState(false);
   const [mode, setMode] = useState<AppMode>("transparent");
   const [tool, setTool] = useState<ToolMode>("select");
   const [params, setParams] = useState<SegmentParams>(defaultParams);
@@ -39,11 +49,21 @@ function App() {
   const [exportScope, setExportScope] = useState<"selected" | "all">("selected");
   const [detecting, setDetecting] = useState(false);
   const [state, dispatch] = useReducer(segmentationReducer, initialSegmentationState);
+  const t = translations[language];
 
   const selectedItems = useMemo(
     () => state.items.filter((item) => state.selectedIds.includes(item.id)),
     [state.items, state.selectedIds],
   );
+
+  useEffect(() => {
+    document.documentElement.lang = language === "zh" ? "zh-CN" : "en";
+    localStorage.setItem("image-splitter-language", language);
+  }, [language]);
+
+  useEffect(() => {
+    localStorage.setItem("image-splitter-theme", theme);
+  }, [theme]);
 
   async function handleFile(file: File) {
     const loaded = await fileToLoadedImage(file);
@@ -86,8 +106,8 @@ function App() {
           items: output.items,
           selectedIds: output.selectedIds,
           status: output.warning
-            ? `已切换到${nextMode === "transparent" ? "透明图块" : "漫画格"}模式；${output.warning}`
-            : `已切换到${nextMode === "transparent" ? "透明图块" : "漫画格"}模式`,
+            ? `${t.status.modeChanged(nextMode === "transparent" ? t.common.tile : t.common.panel)}；${output.warning}`
+            : t.status.modeChanged(nextMode === "transparent" ? t.common.tile : t.common.panel),
         },
       });
     } finally {
@@ -174,7 +194,7 @@ function App() {
       patch: {
         items: next,
         selectedIds: [merged.id],
-        status: "已合并所选图块",
+        status: t.status.merged,
       },
     });
   }
@@ -230,7 +250,7 @@ function App() {
       patch: {
         items: [...state.items, panel].map((item, order) => ({ ...item, order })),
         selectedIds: [panel.id],
-        status: "已添加手动画框漫画格",
+        status: t.status.rectAdded,
       },
     });
   }
@@ -249,7 +269,7 @@ function App() {
       patch: {
         items: [...state.items, panel].map((item, order) => ({ ...item, order })),
         selectedIds: [panel.id],
-        status: "已添加多边形漫画格",
+        status: t.status.polygonAdded,
       },
     });
   }
@@ -271,8 +291,18 @@ function App() {
     exportMetadata(state.source, state.items);
   }
 
+  function displayStatus() {
+    if (detecting) return t.status.detecting;
+    if (language === "zh") return state.status;
+    if (!state.source) return t.status.ready;
+    return t.status.loadedSummary(
+      state.items.length,
+      mode === "transparent" ? t.common.tile : t.common.panel,
+    );
+  }
+
   return (
-    <div className="app-shell">
+    <div className="app-shell" data-theme={theme}>
       <input
         ref={fileInputRef}
         className="hidden-input"
@@ -287,10 +317,16 @@ function App() {
       <Toolbar
         mode={mode}
         tool={tool}
+        t={t}
+        language={language}
+        theme={theme}
         canUndo={state.undoStack.length > 0}
         canRedo={state.redoStack.length > 0}
         onModeChange={(nextMode) => void handleModeChange(nextMode)}
         onToolChange={setTool}
+        onLanguageChange={setLanguage}
+        onThemeToggle={() => setTheme((current) => (current === "light" ? "dark" : "light"))}
+        onHelpClick={() => setHelpOpen(true)}
         onUploadClick={() => fileInputRef.current?.click()}
         onUndo={() => dispatch({ type: "undo" })}
         onRedo={() => dispatch({ type: "redo" })}
@@ -298,6 +334,7 @@ function App() {
       <div className="workspace">
         <LeftPanel
           mode={mode}
+          t={t}
           source={state.source}
           params={params}
           comicParams={comicParams}
@@ -316,6 +353,7 @@ function App() {
           onSplitSelected={handleSplitSelected}
         />
         <CanvasWorkspace
+          t={t}
           source={state.source}
           items={state.items}
           selectedIds={state.selectedIds}
@@ -333,6 +371,7 @@ function App() {
           onPolygonPanel={handlePolygonPanel}
         />
         <RightPanel
+          t={t}
           source={state.source}
           selectedItems={selectedItems}
           allItems={state.items}
@@ -348,17 +387,27 @@ function App() {
         />
       </div>
       <footer className="status-bar">
-        <span>{detecting ? "正在加载 OpenCV 并检测漫画格..." : state.status}</span>
-        <span>缩放比例：{Math.round(zoom * 100)}%</span>
-        <span>已选中 {state.selectedIds.length} 个</span>
-        <span>纯前端处理，所有操作在本地完成</span>
+        <span>{displayStatus()}</span>
+        <span>{t.status.zoom(Math.round(zoom * 100))}</span>
+        <span>{t.status.selected(state.selectedIds.length)}</span>
+        <span>{t.status.localOnly}</span>
       </footer>
+      {helpOpen && <HelpModal t={t} onClose={() => setHelpOpen(false)} />}
     </div>
   );
 }
 
 function nextId(items: SliceItem[]) {
   return Math.max(0, ...items.map((item) => item.id)) + 1;
+}
+
+function readPreference<T extends string>(key: string, fallback: T, allowed: readonly T[]): T {
+  try {
+    const stored = localStorage.getItem(`image-splitter-${key}`) as T | null;
+    return stored && allowed.includes(stored) ? stored : fallback;
+  } catch {
+    return fallback;
+  }
 }
 
 export default App;

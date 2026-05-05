@@ -5,3 +5,4 @@ public/opencv.js
 .env.*
 *.log
 tsconfig.tsbuildinfo
+push-github.local.cmd

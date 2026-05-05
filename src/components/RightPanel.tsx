@@ -1,7 +1,9 @@
 import { Archive, Download, FileJson, Minus, Package, Plus, ScanSearch } from "lucide-react";
+import type { UIStrings } from "../i18n";
 import type { LoadedImage, SliceItem } from "../types";
 
 interface RightPanelProps {
+  t: UIStrings;
   source: LoadedImage | null;
   selectedItems: SliceItem[];
   allItems: SliceItem[];
@@ -17,6 +19,7 @@ interface RightPanelProps {
 }
 
 export function RightPanel({
+  t,
   source,
   selectedItems,
   allItems,
@@ -36,21 +39,22 @@ export function RightPanel({
   return (
     <aside className="side-panel right-panel">
       <section className="panel-section preview-section">
-        <h2>5. 图块预览</h2>
+        <h2>{t.right.previewTitle}</h2>
         {selected ? (
           <>
             <div className="selected-summary">
-              <strong>当前选中：#{selected.order + 1}</strong>
-              <span>
-                {selected.boundingBox.width} × {selected.boundingBox.height} px，
-                {selected.pixelCount.toLocaleString()} 像素
-              </span>
+              <strong>{t.right.selected(selected.order + 1)}</strong>
+              <span>{t.right.selectedSize(
+                selected.boundingBox.width,
+                selected.boundingBox.height,
+                selected.pixelCount.toLocaleString(),
+              )}</span>
               {selected.source && (
                 <span>
-                  来源：{selected.source}
-                  {selected.confidence != null
-                    ? `，置信度 ${Math.round(selected.confidence * 100)}%`
-                    : ""}
+                  {t.right.selectedSource(
+                    selected.source,
+                    selected.confidence == null ? undefined : Math.round(selected.confidence * 100),
+                  )}
                 </span>
               )}
             </div>
@@ -65,21 +69,21 @@ export function RightPanel({
               <button className="icon-button" onClick={() => onZoomChange(Math.min(6, zoom + 0.1))}>
                 <Plus size={16} />
               </button>
-              <button className="icon-button" title="适配">
+              <button className="icon-button" title={t.right.fit}>
                 <ScanSearch size={16} />
               </button>
-              <button className="icon-button accented" title="下载当前" onClick={onExportCurrent}>
+              <button className="icon-button accented" title={t.right.downloadCurrent} onClick={onExportCurrent}>
                 <Download size={16} />
               </button>
             </div>
           </>
         ) : (
-          <div className="empty-state">上传图片并选择一个图块后显示预览</div>
+          <div className="empty-state">{t.right.empty}</div>
         )}
       </section>
 
       <section className="panel-section export-section">
-        <h2>6. 导出</h2>
+        <h2>{t.right.exportTitle}</h2>
         <div className="export-options">
           <label>
             <input
@@ -87,7 +91,7 @@ export function RightPanel({
               checked={exportScope === "selected"}
               onChange={() => onExportScopeChange("selected")}
             />
-            导出当前选中图块
+            {t.right.exportSelected}
           </label>
           <label>
             <input
@@ -95,22 +99,22 @@ export function RightPanel({
               checked={exportScope === "all"}
               onChange={() => onExportScopeChange("all")}
             />
-            导出所有图块（{allItems.length} 个）
+            {t.right.exportAll(allItems.length)}
           </label>
         </div>
         <label className="select-label">
-          文件格式
+          {t.right.fileFormat}
           <select value="png" disabled>
             <option>PNG (.png)</option>
           </select>
         </label>
         <button className="primary wide" disabled={!selected} onClick={onExportCurrent}>
           <Download size={16} />
-          导出 PNG
+          {t.right.exportPng}
         </button>
         <button className="secondary wide" disabled={!source || exportCount === 0} onClick={onExportZip}>
           <Package size={16} />
-          批量导出（ZIP）
+          {t.right.exportZip}
         </button>
         <label className="checkbox-line">
           <input
@@ -118,15 +122,15 @@ export function RightPanel({
             checked={includeMetadata}
             onChange={(event) => onIncludeMetadataChange(event.target.checked)}
           />
-          同时导出 metadata.json
+          {t.right.includeMetadata}
         </label>
         <button className="text-command" disabled={!source || allItems.length === 0} onClick={onExportMetadata}>
           <FileJson size={16} />
-          单独导出 metadata.json
+          {t.right.exportMetadata}
         </button>
         <div className="export-footnote">
           <Archive size={15} />
-          导出会按当前列表顺序命名。
+          {t.right.exportFootnote}
         </div>
       </section>
     </aside>

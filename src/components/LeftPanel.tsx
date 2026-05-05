@@ -8,6 +8,7 @@ import {
   Scissors,
   ScanSearch,
 } from "lucide-react";
+import type { UIStrings } from "../i18n";
 import type {
   AppMode,
   ComicDetectionParams,
@@ -19,6 +20,7 @@ import { formatBytes } from "../utils/canvas";
 
 interface LeftPanelProps {
   mode: AppMode;
+  t: UIStrings;
   source: LoadedImage | null;
   params: SegmentParams;
   comicParams: ComicDetectionParams;
@@ -39,6 +41,7 @@ interface LeftPanelProps {
 
 export function LeftPanel({
   mode,
+  t,
   source,
   params,
   comicParams,
@@ -59,7 +62,7 @@ export function LeftPanel({
   return (
     <aside className="side-panel left-panel">
       <section className="panel-section">
-        <h2>1. 上传图片</h2>
+        <h2>{t.left.uploadTitle}</h2>
         <label className="upload-box">
           <input
             type="file"
@@ -71,8 +74,8 @@ export function LeftPanel({
             }}
           />
           <ImageUp size={34} />
-          <strong>点击或拖拽图片到此处</strong>
-          <span>支持 PNG / WebP / JPG</span>
+          <strong>{t.left.uploadStrong}</strong>
+          <span>{t.left.uploadFormats}</span>
         </label>
         {source && (
           <div className="file-row">
@@ -89,11 +92,11 @@ export function LeftPanel({
       </section>
 
       <section className="panel-section">
-        <h2>2. 分割设置</h2>
+        <h2>{t.left.settingsTitle}</h2>
         {mode === "transparent" ? (
           <>
             <div className="control-row">
-              <label>Alpha 阈值</label>
+              <label>{t.left.alphaThreshold}</label>
               <input
                 type="range"
                 min="0"
@@ -115,19 +118,19 @@ export function LeftPanel({
               />
             </div>
             <div className="control-row">
-              <label>连通规则</label>
+              <label>{t.left.neighborMode}</label>
               <div className="segmented">
                 <button
                   className={params.neighborMode === 4 ? "active" : ""}
                   onClick={() => onParamsChange({ ...params, neighborMode: 4 })}
                 >
-                  4 邻域
+                  {t.left.neighbor4}
                 </button>
                 <button
                   className={params.neighborMode === 8 ? "active" : ""}
                   onClick={() => onParamsChange({ ...params, neighborMode: 8 })}
                 >
-                  8 邻域
+                  {t.left.neighbor8}
                 </button>
               </div>
             </div>
@@ -135,7 +138,7 @@ export function LeftPanel({
         ) : (
           <>
             <div className="control-row">
-              <label>留白强度</label>
+              <label>{t.left.gutterSensitivity}</label>
               <input
                 type="range"
                 min="0"
@@ -163,7 +166,7 @@ export function LeftPanel({
               />
             </div>
             <div className="control-row">
-              <label>边框强度</label>
+              <label>{t.left.borderSensitivity}</label>
               <input
                 type="range"
                 min="0"
@@ -201,7 +204,7 @@ export function LeftPanel({
                   })
                 }
               />
-              合并相近候选
+              {t.left.mergeNearbyPanels}
             </label>
             <label className="checkbox-line compact">
               <input
@@ -214,12 +217,12 @@ export function LeftPanel({
                   })
                 }
               />
-              显示候选置信度
+              {t.left.showConfidence}
             </label>
           </>
         )}
         <div className="control-row">
-          <label>最小像素数</label>
+          <label>{t.left.minPixels}</label>
           <input
             type="range"
             min="1"
@@ -237,45 +240,45 @@ export function LeftPanel({
         </div>
         <div className="mode-note">
           {mode === "transparent"
-            ? "透明模式按 alpha 通道分离，1px 粘连会保留为同一块。"
-            : "漫画模式优先使用 OpenCV 检测整页漫画的留白和边框；失败时自动回退基础规则。"}
+            ? t.left.transparentNote
+            : t.left.comicNote}
         </div>
         {mode === "comic" ? (
           <button className="primary wide" onClick={onAutoDetectComic} disabled={!source || detecting}>
             <ScanSearch size={16} />
-            {detecting ? "检测中..." : "自动检测（OpenCV）"}
+            {detecting ? t.left.detecting : t.left.autoDetect}
           </button>
         ) : (
           <button className="primary wide" onClick={onResegment} disabled={!source}>
             <RotateCcw size={16} />
-            重新分割
+            {t.left.resegment}
           </button>
         )}
       </section>
 
       <section className="panel-section grow">
         <div className="section-title-row">
-          <h2>3. {mode === "transparent" ? "图块列表" : "漫画格列表"}（共 {items.length} 个）</h2>
-          <button className="icon-button" title="筛选">
+          <h2>{t.left.listTitle(mode === "transparent" ? t.common.tiles : t.common.panels, items.length)}</h2>
+          <button className="icon-button" title={t.left.filter}>
             <Filter size={16} />
           </button>
         </div>
         <div className="list-actions">
           <button onClick={onSelectAll}>
             <ListChecks size={15} />
-            全选
+            {t.left.selectAll}
           </button>
           <button>
             <ArrowDownAZ size={15} />
-            按面积
+            {t.left.sortByArea}
           </button>
           <button onClick={onMerge} disabled={selectedIds.length < 2}>
             <Combine size={15} />
-            合并
+            {t.left.merge}
           </button>
           <button onClick={onSplitSelected} disabled={selectedIds.length !== 1}>
             <Scissors size={15} />
-            拆分
+            {t.left.split}
           </button>
         </div>
         <div className="item-grid">
@@ -304,7 +307,7 @@ export function LeftPanel({
                 <div className="order-buttons">
                   <button
                     type="button"
-                    title="前移"
+                    title={t.left.moveUp}
                     onClick={(event) => {
                       event.stopPropagation();
                       onMoveOrder(item.id, -1);
@@ -314,7 +317,7 @@ export function LeftPanel({
                   </button>
                   <button
                     type="button"
-                    title="后移"
+                    title={t.left.moveDown}
                     onClick={(event) => {
                       event.stopPropagation();
                       onMoveOrder(item.id, 1);

@@ -3,7 +3,6 @@ setlocal
 
 cd /d "%~dp0"
 
-set REMOTE_URL=https://github.com/YvanLouise/Image-Tile-Splitter.git
 set BRANCH=main
 set DEFAULT_MESSAGE=Update image tile splitter app
 
@@ -15,7 +14,6 @@ if "%~1"=="" (
 
 echo.
 echo === Image Tile Splitter: one-click GitHub push ===
-echo Repository: %REMOTE_URL%
 echo Branch: %BRANCH%
 echo.
 
@@ -37,17 +35,18 @@ if errorlevel 1 goto :fail
 
 git remote get-url origin >nul 2>nul
 if errorlevel 1 (
-  echo Adding origin remote...
-  git remote add origin %REMOTE_URL%
-  if errorlevel 1 goto :fail
-) else (
-  for /f "delims=" %%u in ('git remote get-url origin') do set CURRENT_REMOTE=%%u
-  if not "%CURRENT_REMOTE%"=="%REMOTE_URL%" (
-    echo Updating origin remote...
-    git remote set-url origin %REMOTE_URL%
-    if errorlevel 1 goto :fail
-  )
+  echo No git remote named origin is configured.
+  echo.
+  echo Set your own GitHub repository first, for example:
+  echo git remote add origin https://github.com/YOUR_NAME/YOUR_REPO.git
+  echo.
+  pause
+  exit /b 1
 )
+
+for /f "delims=" %%u in ('git remote get-url origin') do set CURRENT_REMOTE=%%u
+echo Repository: %CURRENT_REMOTE%
+echo.
 
 if not exist node_modules (
   echo Installing dependencies...
@@ -84,8 +83,7 @@ if errorlevel 1 (
 
 echo.
 echo Push complete.
-echo GitHub Pages will deploy from Actions after the push finishes.
-echo https://yvanlouise.github.io/Image-Tile-Splitter/
+echo GitHub Pages will deploy from Actions if this repository has Pages Actions configured.
 pause
 exit /b 0
 

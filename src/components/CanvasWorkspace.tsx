@@ -1,10 +1,12 @@
 import { Maximize2, MousePointer2, ZoomIn, ZoomOut } from "lucide-react";
 import { useEffect, useMemo, useRef, useState } from "react";
+import type { UIStrings } from "../i18n";
 import type { LoadedImage, SliceItem, ToolMode } from "../types";
 import { applyBrushEdit, applyLineEdit } from "../lib/imageSegmentation";
 import { createCheckerPattern, hitTestBox } from "../utils/canvas";
 
 interface CanvasWorkspaceProps {
+  t: UIStrings;
   source: LoadedImage | null;
   items: SliceItem[];
   selectedIds: number[];
@@ -30,6 +32,7 @@ type DragState =
   | { type: "rect"; from: { x: number; y: number }; to: { x: number; y: number } };
 
 export function CanvasWorkspace({
+  t,
   source,
   items,
   selectedIds,
@@ -83,7 +86,7 @@ export function CanvasWorkspace({
     ctx.fillRect(0, 0, canvasSize.width, canvasSize.height);
 
     if (!source) {
-      drawEmpty(ctx, canvasSize.width, canvasSize.height);
+      drawEmpty(ctx, canvasSize.width, canvasSize.height, t.canvas.empty);
       return;
     }
 
@@ -102,7 +105,7 @@ export function CanvasWorkspace({
     if (drag?.type === "rect") drawRectGuide(ctx, drag.from, drag.to);
     if (polygon.length > 0) drawPolygonGuide(ctx, polygon);
     ctx.restore();
-  }, [canvasSize, source, items, selectedSet, edits, drag, polygon, zoom, pan]);
+  }, [canvasSize, source, items, selectedSet, edits, drag, polygon, zoom, pan, t]);
 
   useEffect(() => {
     if (tool !== "polygon") setPolygon([]);
@@ -227,14 +230,14 @@ export function CanvasWorkspace({
     <main className="canvas-panel">
       <div className="canvas-heading">
         <div>
-          <h2>4. 原图预览（点击图块可选中）</h2>
-          <span>{source ? `${source.width} × ${source.height}` : "等待上传图片"}</span>
+          <h2>{t.canvas.title}</h2>
+          <span>{source ? `${source.width} × ${source.height}` : t.canvas.waiting}</span>
         </div>
         <div className="canvas-controls">
-          <button className="icon-button active" title="当前工具">
+          <button className="icon-button active" title={t.canvas.currentTool}>
             <MousePointer2 size={16} />
           </button>
-          <button className="icon-button" title="缩小" onClick={() => onZoomChange(Math.max(0.05, zoom - 0.1))}>
+          <button className="icon-button" title={t.canvas.zoomOut} onClick={() => onZoomChange(Math.max(0.05, zoom - 0.1))}>
             <ZoomOut size={16} />
           </button>
           <input
@@ -246,10 +249,10 @@ export function CanvasWorkspace({
             onChange={(event) => onZoomChange(Number(event.target.value))}
           />
           <strong>{Math.round(zoom * 100)}%</strong>
-          <button className="icon-button" title="放大" onClick={() => onZoomChange(Math.min(4, zoom + 0.1))}>
+          <button className="icon-button" title={t.canvas.zoomIn} onClick={() => onZoomChange(Math.min(4, zoom + 0.1))}>
             <ZoomIn size={16} />
           </button>
-          <button className="icon-button" title="适配画布" onClick={fitToView}>
+          <button className="icon-button" title={t.canvas.fitCanvas} onClick={fitToView}>
             <Maximize2 size={16} />
           </button>
         </div>
@@ -265,14 +268,14 @@ export function CanvasWorkspace({
         />
       </div>
       <div className="canvas-status">
-        <span>提示：滚轮缩放，拖拽平移，点击图块选择；双击完成多边形。</span>
-        <span>图块总数：{items.length}</span>
+        <span>{t.canvas.hint}</span>
+        <span>{t.canvas.total(items.length)}</span>
       </div>
     </main>
   );
 }
 
-function drawEmpty(ctx: CanvasRenderingContext2D, width: number, height: number) {
+function drawEmpty(ctx: CanvasRenderingContext2D, width: number, height: number, message: string) {
   ctx.strokeStyle = "#c7d7f7";
   ctx.setLineDash([8, 8]);
   ctx.lineWidth = 1.4;
@@ -281,7 +284,7 @@ function drawEmpty(ctx: CanvasRenderingContext2D, width: number, height: number)
   ctx.fillStyle = "#4b5f7a";
   ctx.font = "600 16px Inter, system-ui, sans-serif";
   ctx.textAlign = "center";
-  ctx.fillText("上传 PNG / WebP / JPG 后开始分割", width / 2, height / 2);
+  ctx.fillText(message, width / 2, height / 2);
 }
 
 function drawBoxes(
