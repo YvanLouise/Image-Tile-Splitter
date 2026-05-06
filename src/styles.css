@@ -752,6 +752,21 @@ select {
   background: var(--surface);
 }
 
+.file-name-input {
+  height: 36px;
+  min-width: 0;
+  border: 1px solid var(--line);
+  border-radius: 8px;
+  padding: 0 10px;
+  color: var(--input-text);
+  background: var(--surface);
+}
+
+.file-name-input:focus {
+  border-color: #9fc2ff;
+  outline: 3px solid rgba(37, 99, 235, 0.14);
+}
+
 .language-control select {
   width: 96px;
   height: 30px;

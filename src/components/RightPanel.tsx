@@ -10,9 +10,11 @@ interface RightPanelProps {
   zoom: number;
   includeMetadata: boolean;
   exportScope: "selected" | "all";
+  exportFileName: string;
   onZoomChange: (zoom: number) => void;
   onIncludeMetadataChange: (value: boolean) => void;
   onExportScopeChange: (scope: "selected" | "all") => void;
+  onExportFileNameChange: (fileName: string) => void;
   onExportCurrent: () => void;
   onExportZip: () => void;
   onExportMetadata: () => void;
@@ -26,15 +28,18 @@ export function RightPanel({
   zoom,
   includeMetadata,
   exportScope,
+  exportFileName,
   onZoomChange,
   onIncludeMetadataChange,
   onExportScopeChange,
+  onExportFileNameChange,
   onExportCurrent,
   onExportZip,
   onExportMetadata,
 }: RightPanelProps) {
   const selected = selectedItems[0] ?? null;
   const exportCount = exportScope === "all" ? allItems.length : selectedItems.length;
+  const canRenameSingle = exportScope === "selected" && selectedItems.length === 1;
 
   return (
     <aside className="side-panel right-panel">
@@ -108,6 +113,17 @@ export function RightPanel({
             <option>PNG (.png)</option>
           </select>
         </label>
+        {canRenameSingle && (
+          <label className="select-label">
+            {t.right.exportFileName}
+            <input
+              className="file-name-input"
+              value={exportFileName}
+              placeholder={t.right.fileNamePlaceholder}
+              onChange={(event) => onExportFileNameChange(event.target.value)}
+            />
+          </label>
+        )}
         <button className="primary wide" disabled={!selected} onClick={onExportCurrent}>
           <Download size={16} />
           {t.right.exportPng}

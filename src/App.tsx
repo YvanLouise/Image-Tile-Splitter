@@ -6,7 +6,7 @@ import { RightPanel } from "./components/RightPanel";
 import { Toolbar } from "./components/Toolbar";
 import { translations } from "./i18n";
 import { defaultComicDetectionParams } from "./lib/comicDetection";
-import { exportMetadata, exportSingle, exportZip } from "./lib/exportAssets";
+import { exportMetadata, exportSingle, exportZip, itemFileName } from "./lib/exportAssets";
 import { makePolygonPanel, makeRectPanel, mergeItems } from "./lib/imageSegmentation";
 import {
   createInitialSegmentation,
@@ -47,6 +47,7 @@ function App() {
   const [pan, setPan] = useState({ x: 32, y: 32 });
   const [includeMetadata, setIncludeMetadata] = useState(true);
   const [exportScope, setExportScope] = useState<"selected" | "all">("selected");
+  const [exportFileName, setExportFileName] = useState("");
   const [detecting, setDetecting] = useState(false);
   const [state, dispatch] = useReducer(segmentationReducer, initialSegmentationState);
   const t = translations[language];
@@ -64,6 +65,14 @@ function App() {
   useEffect(() => {
     localStorage.setItem("image-splitter-theme", theme);
   }, [theme]);
+
+  useEffect(() => {
+    if (exportScope !== "selected" || selectedItems.length !== 1) {
+      setExportFileName("");
+      return;
+    }
+    setExportFileName(itemFileName(selectedItems[0]));
+  }, [exportScope, selectedItems]);
 
   async function handleFile(file: File) {
     const loaded = await fileToLoadedImage(file);
@@ -276,7 +285,11 @@ function App() {
 
   function handleExportCurrent() {
     const targets = exportScope === "all" ? state.items : selectedItems;
-    if (targets.length === 1) exportSingle(targets[0]);
+    if (targets.length === 1) {
+      const customFileName =
+        exportScope === "selected" && selectedItems.length === 1 ? exportFileName : undefined;
+      exportSingle(targets[0], customFileName);
+    }
     else if (state.source && targets.length > 1) void exportZip(state.source, targets, includeMetadata);
   }
 
@@ -378,9 +391,11 @@ function App() {
           zoom={zoom}
           includeMetadata={includeMetadata}
           exportScope={exportScope}
+          exportFileName={exportFileName}
           onZoomChange={setZoom}
           onIncludeMetadataChange={setIncludeMetadata}
           onExportScopeChange={setExportScope}
+          onExportFileNameChange={setExportFileName}
           onExportCurrent={handleExportCurrent}
           onExportZip={handleExportZip}
           onExportMetadata={handleExportMetadata}

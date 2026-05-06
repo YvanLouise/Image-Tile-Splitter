@@ -40,8 +40,20 @@ export function itemFileName(item: SliceItem) {
   return `${prefix}-${String(item.order + 1).padStart(3, "0")}.png`;
 }
 
-export function exportSingle(item: SliceItem) {
-  downloadUrl(item.exportUrl, itemFileName(item));
+export function sanitizePngFileName(value: string, fallback: string) {
+  const fallbackBase = fallback.replace(/\.png$/i, "");
+  const base = value
+    .trim()
+    .replace(/\.png$/i, "")
+    .replace(/[<>:"/\\|?*\u0000-\u001f]/g, "-")
+    .replace(/\s+/g, " ")
+    .replace(/[. ]+$/g, "");
+  return `${base || fallbackBase}.png`;
+}
+
+export function exportSingle(item: SliceItem, fileName?: string) {
+  const fallback = itemFileName(item);
+  downloadUrl(item.exportUrl, fileName ? sanitizePngFileName(fileName, fallback) : fallback);
 }
 
 export function exportMetadata(source: LoadedImage, items: SliceItem[]) {
