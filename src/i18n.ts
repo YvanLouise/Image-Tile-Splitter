@@ -27,6 +27,7 @@ export const translations = {
       toolStrip: "编辑工具",
       transparentMode: "图块",
       comicMode: "漫画格",
+      chromaMode: "色度抠图",
       undo: "撤销",
       redo: "重做",
       export: "导出",
@@ -80,6 +81,49 @@ export const translations = {
       hint: "提示：滚轮缩放，拖拽平移，点击图块选择；双击完成多边形。",
       total: (count: number) => `图块总数：${count}`,
     },
+    chroma: {
+      uploadTitle: "1. 上传绿幕 / 蓝幕图片",
+      settingsTitle: "2. 色度抠图设置",
+      keyColor: "背景色",
+      tolerance: "色差容差",
+      softness: "边缘柔化",
+      edgeContract: "边缘收缩",
+      despill: "去溢色",
+      invert: "反选遮罩",
+      livePreview: "实时预览参数变化",
+      reset: "恢复默认参数",
+      note: "使用 Lab 感知色差生成平滑遮罩。先用吸管点击背景，再调整容差和边缘参数。",
+      apply: "应用抠图参数",
+      processing: "处理中...",
+      canvasTitle: "3. 抠图工作区",
+      canvasEmpty: "上传图片后使用吸管选取背景色",
+      eyedropper: "吸管取色",
+      pickHint: "点击画布采样背景色；滚轮缩放",
+      panHint: "拖动画布平移；滚轮缩放",
+      previewModes: {
+        original: "原图",
+        result: "抠图结果",
+        mask: "遮罩",
+      },
+      resultTitle: "4. 结果预览",
+      outputReady: "透明 PNG 已生成",
+      foreground: (pixels: string, percent: number) =>
+        `保留 ${pixels} 像素（${percent}%）`,
+      resultAlt: "色度抠图结果",
+      exportPng: "导出透明 PNG",
+      emptyResult: "上传图片并应用参数后显示透明结果",
+      guideTitle: "快速操作",
+      guideSteps: [
+        "选择吸管，在画布中点击需要移除的背景。",
+        "提高容差可移除更多相近颜色，柔化用于平滑半透明边缘。",
+        "使用边缘收缩清除残边，再用去溢色降低绿边或蓝边。",
+      ],
+      statusReady: "等待上传色度背景图片",
+      statusLoaded: (width: number, height: number) =>
+        `已载入色度图片：${width} x ${height}`,
+      localProcessing: "Lab 色差在浏览器本地计算",
+      transparentPng: "输出保持原尺寸和透明通道",
+    },
     right: {
       previewTitle: "5. 图块预览",
       selected: (order: number) => `当前选中：#${order}`,
@@ -117,6 +161,13 @@ export const translations = {
     help: {
       title: "使用帮助",
       intro: "这个工具在浏览器本地分割图片，不会上传素材。透明图块优先使用 alpha 连通域；漫画格使用 OpenCV 候选和手动修正结合。",
+      visitCounter: {
+        title: "独立 IP 访问统计",
+        loading: "正在读取访问统计...",
+        disabled: "未配置访问统计服务",
+        error: "访问统计暂时不可用",
+        uniqueVisitors: (count: number) => `${count.toLocaleString()} 个不同 IP 已访问`,
+      },
       sections: [
         {
           title: "透明图块模式",
@@ -139,6 +190,14 @@ export const translations = {
           items: [
             "右侧可导出当前选中项，也可以按列表顺序批量导出 ZIP。",
             "metadata.json 会记录原图尺寸、每个图块的位置、顺序和多边形信息。",
+          ],
+        },
+        {
+          title: "色度抠图模式",
+          items: [
+            "适合背景颜色相对统一的绿幕、蓝幕或纯色背景图片。",
+            "用吸管采样背景色，再通过容差、柔化、边缘收缩和去溢色改善边缘。",
+            "导出的 PNG 保持原始画布尺寸并包含透明通道。",
           ],
         },
       ],
@@ -169,6 +228,7 @@ export const translations = {
       toolStrip: "Edit tools",
       transparentMode: "Tiles",
       comicMode: "Panels",
+      chromaMode: "Chroma Key",
       undo: "Undo",
       redo: "Redo",
       export: "Export",
@@ -222,6 +282,49 @@ export const translations = {
       hint: "Tip: mouse wheel zooms, drag pans, click selects; double-click finishes a polygon.",
       total: (count: number) => `Items: ${count}`,
     },
+    chroma: {
+      uploadTitle: "1. Upload Green / Blue Screen",
+      settingsTitle: "2. Chroma Key Settings",
+      keyColor: "Key color",
+      tolerance: "Tolerance",
+      softness: "Edge softness",
+      edgeContract: "Edge contract",
+      despill: "Despill",
+      invert: "Invert mask",
+      livePreview: "Preview changes live",
+      reset: "Reset parameters",
+      note: "A smooth mask is generated from perceptual Lab color distance. Pick the background first, then refine the edge.",
+      apply: "Apply Chroma Key",
+      processing: "Processing...",
+      canvasTitle: "3. Chroma Workspace",
+      canvasEmpty: "Upload an image, then pick its background color",
+      eyedropper: "Pick background color",
+      pickHint: "Click the canvas to sample the background; use the wheel to zoom",
+      panHint: "Drag to pan; use the wheel to zoom",
+      previewModes: {
+        original: "Original",
+        result: "Result",
+        mask: "Mask",
+      },
+      resultTitle: "4. Result Preview",
+      outputReady: "Transparent PNG ready",
+      foreground: (pixels: string, percent: number) =>
+        `${pixels} pixels retained (${percent}%)`,
+      resultAlt: "Chroma key result",
+      exportPng: "Export Transparent PNG",
+      emptyResult: "Upload an image and apply the settings to preview the result",
+      guideTitle: "Quick Workflow",
+      guideSteps: [
+        "Select the eyedropper and click the background to remove.",
+        "Increase tolerance for similar colors and softness for translucent edges.",
+        "Contract the edge to remove halos, then use despill to reduce green or blue fringing.",
+      ],
+      statusReady: "Waiting for a chroma background image",
+      statusLoaded: (width: number, height: number) =>
+        `Chroma image loaded: ${width} x ${height}`,
+      localProcessing: "Lab color distance runs locally",
+      transparentPng: "Original dimensions and alpha are preserved",
+    },
     right: {
       previewTitle: "5. Preview",
       selected: (order: number) => `Selected: #${order}`,
@@ -259,6 +362,13 @@ export const translations = {
     help: {
       title: "Help",
       intro: "This tool slices images locally in your browser. Transparent assets use alpha connected components; comic pages combine OpenCV candidates with manual correction.",
+      visitCounter: {
+        title: "Unique IP visits",
+        loading: "Loading visit count...",
+        disabled: "Visit counter is not configured",
+        error: "Visit counter is temporarily unavailable",
+        uniqueVisitors: (count: number) => `${count.toLocaleString()} unique IPs have visited`,
+      },
       sections: [
         {
           title: "Transparent Tile Mode",
@@ -281,6 +391,14 @@ export const translations = {
           items: [
             "Export the selected item or batch export a ZIP in the current list order.",
             "metadata.json records source size, item bounds, order, and polygon data when available.",
+          ],
+        },
+        {
+          title: "Chroma Key Mode",
+          items: [
+            "Use this for green screens, blue screens, or images with a mostly uniform background color.",
+            "Sample the background, then refine tolerance, softness, edge contraction, and despill.",
+            "Exported PNG files preserve the original canvas dimensions and include transparency.",
           ],
         },
       ],

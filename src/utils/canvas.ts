@@ -15,8 +15,16 @@ export function createCheckerPattern(ctx: CanvasRenderingContext2D, size = 16) {
 }
 
 export async function fileToLoadedImage(file: File): Promise<LoadedImage> {
-  const url = URL.createObjectURL(file);
-  const bitmap = await createImageBitmap(file);
+  return blobToLoadedImage(file, file.name, file.size);
+}
+
+export async function blobToLoadedImage(
+  blob: Blob,
+  fileName: string,
+  size = blob.size,
+): Promise<LoadedImage> {
+  const url = URL.createObjectURL(blob);
+  const bitmap = await createImageBitmap(blob);
   const canvas = document.createElement("canvas");
   canvas.width = bitmap.width;
   canvas.height = bitmap.height;
@@ -25,10 +33,11 @@ export async function fileToLoadedImage(file: File): Promise<LoadedImage> {
   ctx.drawImage(bitmap, 0, 0);
   const imageData = ctx.getImageData(0, 0, bitmap.width, bitmap.height);
   return {
-    fileName: file.name,
+    fileName,
     width: bitmap.width,
     height: bitmap.height,
-    size: file.size,
+    size,
+    blob,
     url,
     bitmap,
     imageData,

@@ -1,13 +1,21 @@
 import { useEffect, useMemo, useReducer, useRef, useState } from "react";
 import { CanvasWorkspace } from "./components/CanvasWorkspace";
+import { ChromaWorkspace } from "./components/ChromaWorkspace";
 import { HelpModal } from "./components/HelpModal";
 import { LeftPanel } from "./components/LeftPanel";
 import { RightPanel } from "./components/RightPanel";
 import { Toolbar } from "./components/Toolbar";
 import { translations } from "./i18n";
 import { defaultComicDetectionParams } from "./lib/comicDetection";
+import { defaultChromaKeyParams } from "./lib/chromaKey";
 import { exportMetadata, exportSingle, exportZip, itemFileName } from "./lib/exportAssets";
 import { makePolygonPanel, makeRectPanel, mergeItems } from "./lib/imageSegmentation";
+import { registerVisit, type VisitCounterState } from "./lib/visitCounter";
+import {
+  loadWorkspaceSnapshot,
+  saveWorkspaceSnapshot,
+  type WorkspaceSnapshot,
+} from "./lib/workspacePersistence";
 import {
   createInitialSegmentation,
   detectItems,
@@ -18,7 +26,15 @@ import {
   segmentationReducer,
 } from "./state/segmentationReducer";
 import type { Language, ThemeMode } from "./i18n";
-import type { AppMode, ComicDetectionParams, SegmentParams, SliceItem, ToolMode } from "./types";
+import type {
+  AppMode,
+  ChromaKeyParams,
+  ComicDetectionParams,
+  LoadedImage,
+  SegmentParams,
+  SliceItem,
+  ToolMode,
+} from "./types";
 import { fileToLoadedImage } from "./utils/canvas";
 import "./styles.css";
 
@@ -30,6 +46,8 @@ const defaultParams: SegmentParams = {
 
 function App() {
   const fileInputRef = useRef<HTMLInputElement | null>(null);
+  const saveQueueRef = useRef<Promise<void>>(Promise.resolve());
+  const latestSnapshotRef = useRef<WorkspaceSnapshot | null>(null);
   const [language, setLanguage] = useState<Language>(() =>
     readPreference("language", "zh", ["zh", "en"]),
   );
@@ -43,12 +61,18 @@ function App() {
   const [comicParams, setComicParams] = useState<ComicDetectionParams>(
     defaultComicDetectionParams,
   );
+  const [chromaParams, setChromaParams] = useState<ChromaKeyParams>(
+    defaultChromaKeyParams,
+  );
+  const [chromaSource, setChromaSource] = useState<LoadedImage | null>(null);
   const [zoom, setZoom] = useState(1);
   const [pan, setPan] = useState({ x: 32, y: 32 });
   const [includeMetadata, setIncludeMetadata] = useState(true);
   const [exportScope, setExportScope] = useState<"selected" | "all">("selected");
   const [exportFileName, setExportFileName] = useState("");
   const [detecting, setDetecting] = useState(false);
+  const [visitCounter, setVisitCounter] = useState<VisitCounterState>({ status: "loading" });
+  const [workspaceReady, setWorkspaceReady] = useState(false);
   const [state, dispatch] = useReducer(segmentationReducer, initialSegmentationState);
   const t = translations[language];
 
@@ -67,6 +91,93 @@ function App() {
   }, [theme]);
 
   useEffect(() => {
+    let active = true;
+    void loadWorkspaceSnapshot()
+      .then((restored) => {
+        if (!active || !restored) return;
+        setMode(restored.mode);
+        setTool(restored.tool);
+        setParams(restored.params);
+        setComicParams(restored.comicParams);
+        setChromaParams(restored.chromaParams);
+        setChromaSource(restored.chromaSource);
+        setZoom(restored.zoom);
+        setPan(restored.pan);
+        setIncludeMetadata(restored.includeMetadata);
+        setExportScope(restored.exportScope);
+        dispatch({ type: "restore", state: restored.segmentationState });
+      })
+      .finally(() => {
+        if (active) setWorkspaceReady(true);
+      });
+    return () => {
+      active = false;
+    };
+  }, []);
+
+  useEffect(() => {
+    if (!workspaceReady) return;
+    const snapshot = {
+      mode,
+      tool,
+      params,
+      comicParams,
+      chromaParams,
+      zoom,
+      pan,
+      includeMetadata,
+      exportScope,
+      segmentationState: state,
+      chromaSource,
+    };
+    latestSnapshotRef.current = snapshot;
+    const timer = window.setTimeout(() => {
+      enqueueWorkspaceSave(snapshot);
+    }, 400);
+    return () => window.clearTimeout(timer);
+  }, [
+    chromaParams,
+    chromaSource,
+    comicParams,
+    exportScope,
+    includeMetadata,
+    mode,
+    pan,
+    params,
+    state,
+    tool,
+    workspaceReady,
+    zoom,
+  ]);
+
+  useEffect(() => {
+    function flushWorkspace() {
+      if (latestSnapshotRef.current) {
+        enqueueWorkspaceSave(latestSnapshotRef.current);
+      }
+    }
+    function handleVisibilityChange() {
+      if (document.visibilityState === "hidden") flushWorkspace();
+    }
+    window.addEventListener("pagehide", flushWorkspace);
+    document.addEventListener("visibilitychange", handleVisibilityChange);
+    return () => {
+      window.removeEventListener("pagehide", flushWorkspace);
+      document.removeEventListener("visibilitychange", handleVisibilityChange);
+    };
+  }, []);
+
+  useEffect(() => {
+    let active = true;
+    void registerVisit().then((result) => {
+      if (active) setVisitCounter(result);
+    });
+    return () => {
+      active = false;
+    };
+  }, []);
+
+  useEffect(() => {
     if (exportScope !== "selected" || selectedItems.length !== 1) {
       setExportFileName("");
       return;
@@ -76,6 +187,10 @@ function App() {
 
   async function handleFile(file: File) {
     const loaded = await fileToLoadedImage(file);
+    if (mode === "chroma") {
+      setChromaSource(loaded);
+      return;
+    }
     setDetecting(mode === "comic");
     try {
       const output = await createInitialSegmentation(loaded, mode, params, comicParams);
@@ -102,6 +217,7 @@ function App() {
 
   async function handleModeChange(nextMode: AppMode) {
     setMode(nextMode);
+    if (nextMode === "chroma") return;
     if (!state.source) return;
     setDetecting(nextMode === "comic");
     try {
@@ -125,7 +241,7 @@ function App() {
   }
 
   function handleResegment() {
-    if (!state.source || !state.originalMask || !state.edits) return;
+    if (mode === "chroma" || !state.source || !state.originalMask || !state.edits) return;
     const result = resegmentEditedMask(
       state.source,
       mode,
@@ -209,7 +325,7 @@ function App() {
   }
 
   function handleSplitSelected() {
-    if (!state.source || !state.originalMask || !state.edits) return;
+    if (mode === "chroma" || !state.source || !state.originalMask || !state.edits) return;
     const result = resegmentEditedMask(
       state.source,
       mode,
@@ -237,7 +353,7 @@ function App() {
   }
 
   function handleMaskCommit(nextEdits: Int8Array) {
-    if (!state.source || !state.originalMask) return;
+    if (mode === "chroma" || !state.source || !state.originalMask) return;
     const result = resegmentEditedMask(state.source, mode, state.originalMask, nextEdits, params);
     dispatch({
       type: "apply",
@@ -305,6 +421,11 @@ function App() {
   }
 
   function displayStatus() {
+    if (mode === "chroma") {
+      return chromaSource
+        ? t.chroma.statusLoaded(chromaSource.width, chromaSource.height)
+        : t.chroma.statusReady;
+    }
     if (detecting) return t.status.detecting;
     if (language === "zh") return state.status;
     if (!state.source) return t.status.ready;
@@ -312,6 +433,13 @@ function App() {
       state.items.length,
       mode === "transparent" ? t.common.tile : t.common.panel,
     );
+  }
+
+  function enqueueWorkspaceSave(snapshot: WorkspaceSnapshot) {
+    saveQueueRef.current = saveQueueRef.current
+      .catch(() => undefined)
+      .then(() => saveWorkspaceSnapshot(snapshot))
+      .catch(() => undefined);
   }
 
   return (
@@ -344,70 +472,86 @@ function App() {
         onUndo={() => dispatch({ type: "undo" })}
         onRedo={() => dispatch({ type: "redo" })}
       />
-      <div className="workspace">
-        <LeftPanel
-          mode={mode}
+      {mode === "chroma" ? (
+        <ChromaWorkspace
           t={t}
-          source={state.source}
-          params={params}
-          comicParams={comicParams}
-          items={state.items}
-          selectedIds={state.selectedIds}
-          detecting={detecting}
-          onParamsChange={setParams}
-          onComicParamsChange={setComicParams}
+          source={chromaSource}
+          params={chromaParams}
+          onParamsChange={setChromaParams}
           onFileChange={(file) => void handleFile(file)}
-          onResegment={handleResegment}
-          onAutoDetectComic={() => void handleAutoDetectComic()}
-          onSelect={(id, additive) => dispatch({ type: "select", id, additive })}
-          onSelectAll={() => dispatch({ type: "selectAll" })}
-          onMoveOrder={handleMoveOrder}
-          onMerge={handleMerge}
-          onSplitSelected={handleSplitSelected}
         />
-        <CanvasWorkspace
-          t={t}
-          source={state.source}
-          items={state.items}
-          selectedIds={state.selectedIds}
-          edits={state.edits}
-          tool={tool}
-          zoom={zoom}
-          pan={pan}
-          onZoomChange={setZoom}
-          onPanChange={setPan}
-          onSelect={(id, additive) => dispatch({ type: "select", id, additive })}
-          onMaskEditStart={handleMaskEditStart}
-          onMaskDraft={handleMaskDraft}
-          onMaskCommit={handleMaskCommit}
-          onRectPanel={handleRectPanel}
-          onPolygonPanel={handlePolygonPanel}
-        />
-        <RightPanel
-          t={t}
-          source={state.source}
-          selectedItems={selectedItems}
-          allItems={state.items}
-          zoom={zoom}
-          includeMetadata={includeMetadata}
-          exportScope={exportScope}
-          exportFileName={exportFileName}
-          onZoomChange={setZoom}
-          onIncludeMetadataChange={setIncludeMetadata}
-          onExportScopeChange={setExportScope}
-          onExportFileNameChange={setExportFileName}
-          onExportCurrent={handleExportCurrent}
-          onExportZip={handleExportZip}
-          onExportMetadata={handleExportMetadata}
-        />
-      </div>
+      ) : (
+        <div className="workspace">
+          <LeftPanel
+            mode={mode}
+            t={t}
+            source={state.source}
+            params={params}
+            comicParams={comicParams}
+            items={state.items}
+            selectedIds={state.selectedIds}
+            detecting={detecting}
+            onParamsChange={setParams}
+            onComicParamsChange={setComicParams}
+            onFileChange={(file) => void handleFile(file)}
+            onResegment={handleResegment}
+            onAutoDetectComic={() => void handleAutoDetectComic()}
+            onSelect={(id, additive) => dispatch({ type: "select", id, additive })}
+            onSelectAll={() => dispatch({ type: "selectAll" })}
+            onMoveOrder={handleMoveOrder}
+            onMerge={handleMerge}
+            onSplitSelected={handleSplitSelected}
+          />
+          <CanvasWorkspace
+            t={t}
+            source={state.source}
+            items={state.items}
+            selectedIds={state.selectedIds}
+            edits={state.edits}
+            tool={tool}
+            zoom={zoom}
+            pan={pan}
+            onZoomChange={setZoom}
+            onPanChange={setPan}
+            onSelect={(id, additive) => dispatch({ type: "select", id, additive })}
+            onMaskEditStart={handleMaskEditStart}
+            onMaskDraft={handleMaskDraft}
+            onMaskCommit={handleMaskCommit}
+            onRectPanel={handleRectPanel}
+            onPolygonPanel={handlePolygonPanel}
+          />
+          <RightPanel
+            t={t}
+            source={state.source}
+            selectedItems={selectedItems}
+            allItems={state.items}
+            zoom={zoom}
+            includeMetadata={includeMetadata}
+            exportScope={exportScope}
+            exportFileName={exportFileName}
+            onZoomChange={setZoom}
+            onIncludeMetadataChange={setIncludeMetadata}
+            onExportScopeChange={setExportScope}
+            onExportFileNameChange={setExportFileName}
+            onExportCurrent={handleExportCurrent}
+            onExportZip={handleExportZip}
+            onExportMetadata={handleExportMetadata}
+          />
+        </div>
+      )}
       <footer className="status-bar">
         <span>{displayStatus()}</span>
-        <span>{t.status.zoom(Math.round(zoom * 100))}</span>
-        <span>{t.status.selected(state.selectedIds.length)}</span>
+        <span>{mode === "chroma" ? t.chroma.localProcessing : t.status.zoom(Math.round(zoom * 100))}</span>
+        <span>{mode === "chroma" ? t.chroma.transparentPng : t.status.selected(state.selectedIds.length)}</span>
         <span>{t.status.localOnly}</span>
       </footer>
-      {helpOpen && <HelpModal t={t} onClose={() => setHelpOpen(false)} />}
+      {helpOpen && (
+        <HelpModal
+          t={t}
+          visitCounter={visitCounter}
+          onClose={() => setHelpOpen(false)}
+        />
+      )}
     </div>
   );
 }

@@ -25,6 +25,10 @@ export type SegmentationAction =
       selectedIds: number[];
       status: string;
     }
+  | {
+      type: "restore";
+      state: Omit<SegmentationState, "undoStack" | "redoStack">;
+    }
   | { type: "apply"; patch: CorePatch; history?: boolean }
   | { type: "draftEdits"; edits: Int8Array }
   | { type: "select"; id: number; additive?: boolean }
@@ -56,6 +60,12 @@ export function segmentationReducer(
         items: action.items,
         selectedIds: action.selectedIds,
         status: action.status,
+        undoStack: [],
+        redoStack: [],
+      };
+    case "restore":
+      return {
+        ...action.state,
         undoStack: [],
         redoStack: [],
       };

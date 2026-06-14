@@ -9,6 +9,7 @@ import {
   Moon,
   Paintbrush,
   PenLine,
+  Pipette,
   ScissorsLineDashed,
   Sun,
   Undo2,
@@ -93,24 +94,33 @@ export function Toolbar({
           >
             {t.toolbar.comicMode}
           </button>
+          <button
+            className={mode === "chroma" ? "active" : ""}
+            onClick={() => onModeChange("chroma")}
+          >
+            <Pipette size={14} />
+            {t.toolbar.chromaMode}
+          </button>
         </div>
 
-        <div className="tool-strip" aria-label={t.toolbar.toolStrip}>
-          {tools.map((item) => {
-            const Icon = item.icon;
-            const label = t.toolbar.tools[item.labelKey];
-            return (
-              <button
-                key={item.id}
-                className={tool === item.id ? "icon-button active" : "icon-button"}
-                title={label}
-                onClick={() => onToolChange(item.id)}
-              >
-                <Icon size={17} />
-              </button>
-            );
-          })}
-        </div>
+        {mode !== "chroma" && (
+          <div className="tool-strip" aria-label={t.toolbar.toolStrip}>
+            {tools.map((item) => {
+              const Icon = item.icon;
+              const label = t.toolbar.tools[item.labelKey];
+              return (
+                <button
+                  key={item.id}
+                  className={tool === item.id ? "icon-button active" : "icon-button"}
+                  title={label}
+                  onClick={() => onToolChange(item.id)}
+                >
+                  <Icon size={17} />
+                </button>
+              );
+            })}
+          </div>
+        )}
       </div>
 
       <div className="header-actions">
@@ -118,10 +128,10 @@ export function Toolbar({
           <ImageUp size={17} />
           {t.common.upload}
         </button>
-        <button className="icon-button" title={t.toolbar.undo} disabled={!canUndo} onClick={onUndo}>
+        <button className="icon-button" title={t.toolbar.undo} disabled={mode === "chroma" || !canUndo} onClick={onUndo}>
           <Undo2 size={17} />
         </button>
-        <button className="icon-button" title={t.toolbar.redo} disabled={!canRedo} onClick={onRedo}>
+        <button className="icon-button" title={t.toolbar.redo} disabled={mode === "chroma" || !canRedo} onClick={onRedo}>
           <Redo2 size={17} />
         </button>
         <button className="ghost-action" title={t.common.help} onClick={onHelpClick}>

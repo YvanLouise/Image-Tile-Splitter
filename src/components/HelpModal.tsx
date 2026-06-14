@@ -1,12 +1,14 @@
 import { X } from "lucide-react";
 import type { UIStrings } from "../i18n";
+import type { VisitCounterState } from "../lib/visitCounter";
 
 interface HelpModalProps {
   t: UIStrings;
+  visitCounter: VisitCounterState;
   onClose: () => void;
 }
 
-export function HelpModal({ t, onClose }: HelpModalProps) {
+export function HelpModal({ t, visitCounter, onClose }: HelpModalProps) {
   return (
     <div className="modal-backdrop" role="presentation" onMouseDown={onClose}>
       <section
@@ -26,6 +28,7 @@ export function HelpModal({ t, onClose }: HelpModalProps) {
           </button>
         </header>
         <div className="help-content">
+          <VisitCounterCard t={t} visitCounter={visitCounter} />
           {t.help.sections.map((section) => (
             <article key={section.title} className="help-section">
               <h3>{section.title}</h3>
@@ -44,5 +47,25 @@ export function HelpModal({ t, onClose }: HelpModalProps) {
         </footer>
       </section>
     </div>
+  );
+}
+
+function VisitCounterCard({
+  t,
+  visitCounter,
+}: {
+  t: UIStrings;
+  visitCounter: VisitCounterState;
+}) {
+  const detail =
+    visitCounter.status === "ready"
+      ? t.help.visitCounter.uniqueVisitors(visitCounter.uniqueVisitors)
+      : t.help.visitCounter[visitCounter.status];
+
+  return (
+    <article className={`visit-counter-card ${visitCounter.status}`}>
+      <span>{t.help.visitCounter.title}</span>
+      <strong>{detail}</strong>
+    </article>
   );
 }

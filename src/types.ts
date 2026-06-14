@@ -1,4 +1,4 @@
-export type AppMode = "transparent" | "comic";
+export type AppMode = "transparent" | "comic" | "chroma";
 export type NeighborMode = 4 | 8;
 export type ToolMode =
   | "pan"
@@ -32,6 +32,25 @@ export interface ComicDetectionParams {
   showConfidence: boolean;
 }
 
+export interface ChromaKeyParams {
+  keyColor: string;
+  tolerance: number;
+  softness: number;
+  edgeContract: number;
+  despill: number;
+  invert: boolean;
+  livePreview: boolean;
+}
+
+export type ChromaPreviewMode = "original" | "result" | "mask";
+
+export interface ChromaKeyResult {
+  resultUrl: string;
+  maskUrl: string;
+  foregroundPixels: number;
+  totalPixels: number;
+}
+
 export type PanelDetectionSource = "opencv" | "manual" | "fallback";
 
 export interface SliceItem {
@@ -53,6 +72,7 @@ export interface LoadedImage {
   width: number;
   height: number;
   size: number;
+  blob: Blob;
   url: string;
   bitmap: ImageBitmap;
   imageData: ImageData;

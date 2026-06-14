@@ -1,5 +1,4 @@
 import type {
-  AppMode,
   ComicDetectionParams,
   LoadedImage,
   SegmentParams,
@@ -22,9 +21,11 @@ export interface SegmentationOutput {
   warning?: string;
 }
 
+type SegmentationMode = "transparent" | "comic";
+
 export async function createInitialSegmentation(
   source: LoadedImage,
-  mode: AppMode,
+  mode: SegmentationMode,
   segmentParams: SegmentParams,
   comicParams: ComicDetectionParams,
 ): Promise<SegmentationOutput> {
@@ -46,7 +47,7 @@ export async function createInitialSegmentation(
 
 export async function detectItems(
   source: LoadedImage,
-  mode: AppMode,
+  mode: SegmentationMode,
   originalMask: Uint8Array,
   edits: Int8Array,
   segmentParams: SegmentParams,
@@ -67,7 +68,7 @@ export async function detectItems(
 
 export function resegmentEditedMask(
   source: LoadedImage,
-  mode: AppMode,
+  mode: SegmentationMode,
   originalMask: Uint8Array,
   edits: Int8Array,
   segmentParams: SegmentParams,
