@@ -8,6 +8,7 @@ import {
   Scissors,
   ScanSearch,
 } from "lucide-react";
+import { useRef, useState } from "react";
 import type { UIStrings } from "../i18n";
 import type {
   AppMode,
@@ -17,6 +18,7 @@ import type {
   SliceItem,
 } from "../types";
 import { formatBytes } from "../utils/canvas";
+import { getAcceptedImageFile, hasAcceptedImageDrag } from "../utils/uploadDrop";
 
 interface LeftPanelProps {
   mode: AppMode;
@@ -59,11 +61,59 @@ export function LeftPanel({
   onMerge,
   onSplitSelected,
 }: LeftPanelProps) {
+  const dragDepthRef = useRef(0);
+  const [dragActive, setDragActive] = useState(false);
+
+  function resetDragState() {
+    dragDepthRef.current = 0;
+    setDragActive(false);
+  }
+
+  function handleUploadDragEnter(event: React.DragEvent<HTMLLabelElement>) {
+    event.preventDefault();
+    event.stopPropagation();
+    if (!hasAcceptedImageDrag(event.dataTransfer)) return;
+    dragDepthRef.current += 1;
+    setDragActive(true);
+  }
+
+  function handleUploadDragOver(event: React.DragEvent<HTMLLabelElement>) {
+    event.preventDefault();
+    event.stopPropagation();
+    if (hasAcceptedImageDrag(event.dataTransfer)) {
+      event.dataTransfer.dropEffect = "copy";
+      setDragActive(true);
+    } else {
+      event.dataTransfer.dropEffect = "none";
+    }
+  }
+
+  function handleUploadDragLeave(event: React.DragEvent<HTMLLabelElement>) {
+    event.preventDefault();
+    event.stopPropagation();
+    dragDepthRef.current = Math.max(0, dragDepthRef.current - 1);
+    if (dragDepthRef.current === 0) setDragActive(false);
+  }
+
+  function handleUploadDrop(event: React.DragEvent<HTMLLabelElement>) {
+    event.preventDefault();
+    event.stopPropagation();
+    resetDragState();
+    const file = getAcceptedImageFile(event.dataTransfer.files);
+    if (file) onFileChange(file);
+  }
+
   return (
     <aside className="side-panel left-panel">
       <section className="panel-section">
         <h2>{t.left.uploadTitle}</h2>
-        <label className="upload-box">
+        <label
+          className={dragActive ? "upload-box drag-active" : "upload-box"}
+          onDragEnter={handleUploadDragEnter}
+          onDragOver={handleUploadDragOver}
+          onDragLeave={handleUploadDragLeave}
+          onDrop={handleUploadDrop}
+        >
           <input
             type="file"
             accept="image/png,image/webp,image/jpeg"

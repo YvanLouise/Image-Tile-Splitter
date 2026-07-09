@@ -22,6 +22,7 @@ import type {
   LoadedImage,
 } from "../types";
 import { createCheckerPattern, downloadUrl, formatBytes } from "../utils/canvas";
+import { getAcceptedImageFile, hasAcceptedImageDrag } from "../utils/uploadDrop";
 
 interface ChromaWorkspaceProps {
   t: UIStrings;
@@ -48,6 +49,8 @@ export function ChromaWorkspace({
   const [processing, setProcessing] = useState(false);
   const [appliedParams, setAppliedParams] = useState(params);
   const [colorDraft, setColorDraft] = useState(params.keyColor);
+  const uploadDragDepthRef = useRef(0);
+  const [uploadDragActive, setUploadDragActive] = useState(false);
   const effectiveParams = params.livePreview ? params : appliedParams;
 
   useEffect(() => {
@@ -85,12 +88,61 @@ export function ChromaWorkspace({
     downloadUrl(result.resultUrl, `${base}-transparent.png`);
   }
 
+  function resetUploadDragState() {
+    uploadDragDepthRef.current = 0;
+    setUploadDragActive(false);
+  }
+
+  function handleUploadDragEnter(event: React.DragEvent<HTMLLabelElement>) {
+    event.preventDefault();
+    event.stopPropagation();
+    if (!hasAcceptedImageDrag(event.dataTransfer)) return;
+    uploadDragDepthRef.current += 1;
+    setUploadDragActive(true);
+  }
+
+  function handleUploadDragOver(event: React.DragEvent<HTMLLabelElement>) {
+    event.preventDefault();
+    event.stopPropagation();
+    if (hasAcceptedImageDrag(event.dataTransfer)) {
+      event.dataTransfer.dropEffect = "copy";
+      setUploadDragActive(true);
+    } else {
+      event.dataTransfer.dropEffect = "none";
+    }
+  }
+
+  function handleUploadDragLeave(event: React.DragEvent<HTMLLabelElement>) {
+    event.preventDefault();
+    event.stopPropagation();
+    uploadDragDepthRef.current = Math.max(0, uploadDragDepthRef.current - 1);
+    if (uploadDragDepthRef.current === 0) setUploadDragActive(false);
+  }
+
+  function handleUploadDrop(event: React.DragEvent<HTMLLabelElement>) {
+    event.preventDefault();
+    event.stopPropagation();
+    resetUploadDragState();
+    const file = getAcceptedImageFile(event.dataTransfer.files);
+    if (file) onFileChange(file);
+  }
+
   return (
     <div className="workspace chroma-workspace">
       <aside className="side-panel left-panel">
         <section className="panel-section">
           <h2>{t.chroma.uploadTitle}</h2>
-          <label className="upload-box chroma-upload">
+          <label
+            className={
+              uploadDragActive
+                ? "upload-box chroma-upload drag-active"
+                : "upload-box chroma-upload"
+            }
+            onDragEnter={handleUploadDragEnter}
+            onDragOver={handleUploadDragOver}
+            onDragLeave={handleUploadDragLeave}
+            onDrop={handleUploadDrop}
+          >
             <input
               type="file"
               accept="image/png,image/webp,image/jpeg"

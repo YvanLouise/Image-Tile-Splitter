@@ -345,6 +345,18 @@ button:disabled {
   align-items: center;
   justify-content: center;
   gap: 5px;
+  transition:
+    border-color 0.15s ease,
+    background 0.15s ease,
+    box-shadow 0.15s ease,
+    transform 0.15s ease;
+}
+
+.upload-box.drag-active {
+  border-color: var(--accent);
+  background: linear-gradient(180deg, var(--accent-soft), var(--button-hover));
+  box-shadow: 0 0 0 4px rgba(37, 99, 235, 0.12);
+  transform: translateY(-1px);
 }
 
 .upload-box input {

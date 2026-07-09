@@ -13,6 +13,13 @@ declare namespace React {
     pointerId: number;
     currentTarget: T;
   }
+
+  interface DragEvent<T = Element> {
+    preventDefault(): void;
+    stopPropagation(): void;
+    dataTransfer: DataTransfer;
+    currentTarget: T;
+  }
 }
 
 declare module "react" {
