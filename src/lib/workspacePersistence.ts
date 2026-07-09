@@ -1,4 +1,5 @@
 import { buildSliceItem } from "./imageSegmentation";
+import { defaultChromaKeyParams } from "./chromaKey";
 import type { SegmentationState } from "../state/segmentationReducer";
 import type {
   AppMode,
@@ -139,7 +140,7 @@ export async function loadWorkspaceSnapshot(): Promise<RestoredWorkspace | null>
       tool: record.tool,
       params: record.params,
       comicParams: record.comicParams,
-      chromaParams: record.chromaParams,
+      chromaParams: normalizeStoredChromaParams(record.chromaParams),
       zoom: record.zoom,
       pan: record.pan,
       includeMetadata: record.includeMetadata,
@@ -182,6 +183,16 @@ async function restoreImage(source: StoredImage | null) {
 function stripItemUrls(item: SliceItem): StoredSliceItem {
   const { previewUrl: _previewUrl, exportUrl: _exportUrl, ...stored } = item;
   return stored;
+}
+
+function normalizeStoredChromaParams(params: Partial<ChromaKeyParams>): ChromaKeyParams {
+  return {
+    ...defaultChromaKeyParams,
+    ...params,
+    outerOnly: params.outerOnly ?? defaultChromaKeyParams.outerOnly,
+    outerMode: params.outerMode ?? defaultChromaKeyParams.outerMode,
+    samplePoint: params.samplePoint,
+  };
 }
 
 function openDatabase() {

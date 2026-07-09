@@ -143,6 +143,15 @@ describe("comic panel detection", () => {
     expect(panel.mask[bubbleY * panel.boundingBox.width + bubbleX]).toBe(1);
   });
 
+  it("does not eagerly create full-size export urls for detected items", () => {
+    const imageData = createImageDataLike(220, 160, [255, 255, 255, 255]);
+    fillRect(imageData, 20, 20, 80, 60, [190, 190, 190, 255]);
+
+    const [panel] = detectComicPanelsFallback(imageData, defaultComicDetectionParams);
+
+    expect(panel.exportUrl).toBe("");
+  });
+
   it("falls back when OpenCV cannot load", async () => {
     const imageData = createImageDataLike(160, 120, [255, 255, 255, 255]);
     fillRect(imageData, 14, 12, 132, 90, [190, 190, 190, 255]);

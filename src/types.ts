@@ -39,6 +39,9 @@ export interface ChromaKeyParams {
   edgeContract: number;
   despill: number;
   invert: boolean;
+  outerOnly: boolean;
+  outerMode: "canvasEdge" | "samplePoint";
+  samplePoint?: { x: number; y: number };
   livePreview: boolean;
 }
 

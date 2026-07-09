@@ -308,7 +308,7 @@ function drawBoxes(
       });
       ctx.closePath();
       ctx.stroke();
-    } else if (isIrregularMask(item)) {
+    } else if (shouldDrawDetailedMaskBoundary(item, selected, items.length)) {
       drawMaskBoundary(ctx, item);
     } else {
       ctx.strokeRect(box.x - 2, box.y - 2, box.width + 4, box.height + 4);
@@ -324,7 +324,18 @@ function drawBoxes(
   }
 }
 
-function isIrregularMask(item: SliceItem) {
+export function shouldDrawDetailedMaskBoundary(
+  item: Pick<SliceItem, "boundingBox" | "pixelCount">,
+  selected: boolean,
+  itemCount: number,
+) {
+  if (!isIrregularMask(item)) return false;
+  const maskArea = item.boundingBox.width * item.boundingBox.height;
+  if (selected) return maskArea <= 180_000;
+  return itemCount <= 32 && maskArea <= 70_000;
+}
+
+function isIrregularMask(item: Pick<SliceItem, "boundingBox" | "pixelCount">) {
   const boxArea = item.boundingBox.width * item.boundingBox.height;
   if (boxArea <= 0) return false;
   return 1 - item.pixelCount / boxArea > 0.03;

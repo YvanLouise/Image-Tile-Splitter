@@ -952,6 +952,11 @@ select {
   min-height: 30px;
 }
 
+.chroma-range-mode {
+  display: grid;
+  gap: 8px;
+}
+
 .chroma-canvas-panel {
   grid-template-rows: 78px minmax(0, 1fr) 38px;
 }

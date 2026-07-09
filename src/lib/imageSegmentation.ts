@@ -270,20 +270,24 @@ export function buildSliceItem(
     source?: PanelDetectionSource;
   },
 ): SliceItem {
-  const exportUrl = renderItemUrl(imageData, box, mask);
+  const previewUrl = renderItemUrl(imageData, box, mask, 160);
   return {
     id: meta.id,
     type: meta.type,
     boundingBox: box,
     pixelCount,
     mask,
-    previewUrl: exportUrl,
-    exportUrl,
+    previewUrl,
+    exportUrl: "",
     order: meta.order,
     polygon: meta.polygon,
     confidence: meta.confidence,
     source: meta.source,
   };
+}
+
+export function renderSliceItemUrl(imageData: ImageData, item: Pick<SliceItem, "boundingBox" | "mask">) {
+  return renderItemUrl(imageData, item.boundingBox, item.mask);
 }
 
 export function connectedComponents(
@@ -380,11 +384,17 @@ export function connectedComponents(
     .map((item, index) => ({ ...item, id: index + 1, order: index }));
 }
 
-function renderItemUrl(imageData: ImageData, box: BoundingBox, mask: Uint8Array) {
+function renderItemUrl(
+  imageData: ImageData,
+  box: BoundingBox,
+  mask: Uint8Array,
+  maxPreviewEdge = Number.POSITIVE_INFINITY,
+) {
   if (typeof document === "undefined") return "";
   const canvas = document.createElement("canvas");
-  canvas.width = Math.max(1, box.width);
-  canvas.height = Math.max(1, box.height);
+  const scale = Math.min(1, maxPreviewEdge / Math.max(box.width, box.height));
+  canvas.width = Math.max(1, Math.round(box.width * scale));
+  canvas.height = Math.max(1, Math.round(box.height * scale));
   const ctx = canvas.getContext("2d");
   if (!ctx) return "";
   const out = ctx.createImageData(canvas.width, canvas.height);
@@ -392,12 +402,14 @@ function renderItemUrl(imageData: ImageData, box: BoundingBox, mask: Uint8Array)
   const dst = out.data;
   const sourceWidth = imageData.width;
 
-  for (let y = 0; y < box.height; y += 1) {
-    for (let x = 0; x < box.width; x += 1) {
-      const local = y * box.width + x;
+  for (let y = 0; y < canvas.height; y += 1) {
+    const sourceY = Math.min(box.height - 1, Math.floor(y / scale));
+    for (let x = 0; x < canvas.width; x += 1) {
+      const sourceX = Math.min(box.width - 1, Math.floor(x / scale));
+      const local = sourceY * box.width + sourceX;
       if (mask[local] === 0) continue;
-      const srcIdx = ((box.y + y) * sourceWidth + (box.x + x)) * 4;
-      const dstIdx = local * 4;
+      const srcIdx = ((box.y + sourceY) * sourceWidth + (box.x + sourceX)) * 4;
+      const dstIdx = (y * canvas.width + x) * 4;
       dst[dstIdx] = src[srcIdx];
       dst[dstIdx + 1] = src[srcIdx + 1];
       dst[dstIdx + 2] = src[srcIdx + 2];

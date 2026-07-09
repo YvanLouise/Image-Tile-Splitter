@@ -12,7 +12,8 @@ import type { UIStrings } from "../i18n";
 import {
   canvasToImagePoint,
   defaultChromaKeyParams,
-  renderChromaKeyResult,
+  renderChromaKeyExportBlob,
+  renderChromaKeyPreview,
   sampleHexColor,
 } from "../lib/chromaKey";
 import type {
@@ -60,7 +61,7 @@ export function ChromaWorkspace({
     }
     setProcessing(true);
     const timer = window.setTimeout(() => {
-      setResult(renderChromaKeyResult(source.imageData, effectiveParams));
+      setResult(renderChromaKeyPreview(source.imageData, effectiveParams));
       setProcessing(false);
     }, params.livePreview ? 70 : 0);
     return () => window.clearTimeout(timer);
@@ -82,10 +83,19 @@ export function ChromaWorkspace({
     onParamsChange({ ...params, [key]: value });
   }
 
-  function exportResult() {
+  async function exportResult() {
     if (!source || !result) return;
     const base = source.fileName.replace(/\.[^.]+$/, "") || "image";
-    downloadUrl(result.resultUrl, `${base}-transparent.png`);
+    setProcessing(true);
+    try {
+      await waitForNextPaint();
+      const blob = await renderChromaKeyExportBlob(source.imageData, effectiveParams);
+      const url = URL.createObjectURL(blob);
+      downloadUrl(url, `${base}-transparent.png`);
+      window.setTimeout(() => URL.revokeObjectURL(url), 1000);
+    } finally {
+      setProcessing(false);
+    }
   }
 
   function resetUploadDragState() {
@@ -239,6 +249,35 @@ export function ChromaWorkspace({
           <label className="checkbox-line compact">
             <input
               type="checkbox"
+              checked={params.outerOnly}
+              onChange={(event) => updateParam("outerOnly", event.target.checked)}
+            />
+            {t.chroma.outerOnly}
+          </label>
+          {params.outerOnly ? (
+            <div className="chroma-range-mode">
+              <div className="segmented preview-switch">
+                <button
+                  className={params.outerMode === "canvasEdge" ? "active" : ""}
+                  onClick={() => updateParam("outerMode", "canvasEdge")}
+                >
+                  {t.chroma.outerCanvasEdge}
+                </button>
+                <button
+                  className={params.outerMode === "samplePoint" ? "active" : ""}
+                  onClick={() => updateParam("outerMode", "samplePoint")}
+                >
+                  {t.chroma.outerSamplePoint}
+                </button>
+              </div>
+              {params.outerMode === "samplePoint" && !params.samplePoint ? (
+                <p className="mode-note">{t.chroma.outerSampleHint}</p>
+              ) : null}
+            </div>
+          ) : null}
+          <label className="checkbox-line compact">
+            <input
+              type="checkbox"
               checked={params.livePreview}
               onChange={(event) => {
                 if (!event.target.checked) {
@@ -273,7 +312,9 @@ export function ChromaWorkspace({
         onToolChange={setTool}
         onZoomChange={setZoom}
         onPanChange={setPan}
-        onPickColor={(color) => updateParam("keyColor", color)}
+        onPickColor={(color, point) =>
+          onParamsChange({ ...params, keyColor: color, samplePoint: point })
+        }
       />
 
       <aside className="side-panel right-panel chroma-right-panel">
@@ -294,7 +335,11 @@ export function ChromaWorkspace({
               <div className="preview-frame chroma-preview-frame">
                 <img src={result.resultUrl} alt={t.chroma.resultAlt} />
               </div>
-              <button className="primary wide chroma-download" onClick={exportResult}>
+              <button
+                className="primary wide chroma-download"
+                disabled={processing}
+                onClick={() => void exportResult()}
+              >
                 <Download size={16} />
                 {t.chroma.exportPng}
               </button>
@@ -343,6 +388,14 @@ function ChromaSlider({
   );
 }
 
+function waitForNextPaint() {
+  return new Promise<void>((resolve) => {
+    window.requestAnimationFrame(() => {
+      window.requestAnimationFrame(() => resolve());
+    });
+  });
+}
+
 function ChromaCanvas({
   t,
   source,
@@ -368,7 +421,7 @@ function ChromaCanvas({
   onToolChange: (tool: CanvasTool) => void;
   onZoomChange: (zoom: number) => void;
   onPanChange: (pan: { x: number; y: number }) => void;
-  onPickColor: (color: string) => void;
+  onPickColor: (color: string, point: { x: number; y: number }) => void;
 }) {
   const canvasRef = useRef<HTMLCanvasElement | null>(null);
   const shellRef = useRef<HTMLDivElement | null>(null);
@@ -444,7 +497,7 @@ function ChromaCanvas({
     if (previewMode === "original") {
       ctx.drawImage(source.bitmap, 0, 0);
     } else if (previewImageRef.current) {
-      ctx.drawImage(previewImageRef.current, 0, 0);
+      ctx.drawImage(previewImageRef.current, 0, 0, source.width, source.height);
     }
     ctx.restore();
   }
@@ -545,7 +598,10 @@ function ChromaCanvas({
             dragRef.current = null;
             if (!source || tool !== "eyedropper" || drag?.moved) return;
             const point = imagePoint(event);
-            onPickColor(sampleHexColor(source.imageData, point.x, point.y));
+            onPickColor(sampleHexColor(source.imageData, point.x, point.y), {
+              x: Math.max(0, Math.min(source.width - 1, Math.floor(point.x))),
+              y: Math.max(0, Math.min(source.height - 1, Math.floor(point.y))),
+            });
           }}
         />
       </div>

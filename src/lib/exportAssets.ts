@@ -1,6 +1,7 @@
 import JSZip from "jszip";
 import type { LoadedImage, SliceItem } from "../types";
 import { downloadUrl } from "../utils/canvas";
+import { renderSliceItemUrl } from "./imageSegmentation";
 
 export interface Metadata {
   sourceWidth: number;
@@ -51,9 +52,12 @@ export function sanitizePngFileName(value: string, fallback: string) {
   return `${base || fallbackBase}.png`;
 }
 
-export function exportSingle(item: SliceItem, fileName?: string) {
+export function exportSingle(source: LoadedImage, item: SliceItem, fileName?: string) {
   const fallback = itemFileName(item);
-  downloadUrl(item.exportUrl, fileName ? sanitizePngFileName(fileName, fallback) : fallback);
+  downloadUrl(
+    renderSliceItemUrl(source.imageData, item),
+    fileName ? sanitizePngFileName(fileName, fallback) : fallback,
+  );
 }
 
 export function exportMetadata(source: LoadedImage, items: SliceItem[]) {
@@ -72,7 +76,7 @@ export async function exportZip(
 ) {
   const zip = new JSZip();
   for (const item of items.slice().sort((a, b) => a.order - b.order)) {
-    const base64 = item.exportUrl.split(",")[1];
+    const base64 = renderSliceItemUrl(source.imageData, item).split(",")[1];
     zip.file(itemFileName(item), base64, { base64: true });
   }
   if (includeMetadata) {

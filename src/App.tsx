@@ -9,7 +9,12 @@ import { translations } from "./i18n";
 import { defaultComicDetectionParams } from "./lib/comicDetection";
 import { defaultChromaKeyParams } from "./lib/chromaKey";
 import { exportMetadata, exportSingle, exportZip, itemFileName } from "./lib/exportAssets";
-import { makePolygonPanel, makeRectPanel, mergeItems } from "./lib/imageSegmentation";
+import {
+  createComicContentMask,
+  makePolygonPanel,
+  makeRectPanel,
+  mergeItems,
+} from "./lib/imageSegmentation";
 import { registerVisit, type VisitCounterState } from "./lib/visitCounter";
 import {
   loadWorkspaceSnapshot,
@@ -191,7 +196,17 @@ function App() {
       setChromaSource(loaded);
       return;
     }
-    setDetecting(mode === "comic");
+    if (mode === "comic") {
+      setDetecting(false);
+      dispatch({
+        type: "load",
+        source: loaded,
+        ...createComicReadyState(loaded, t.status.modeChanged(t.common.panel)),
+      });
+      fitInitialView(loaded.width, loaded.height);
+      return;
+    }
+    setDetecting(false);
     try {
       const output = await createInitialSegmentation(loaded, mode, params, comicParams);
       dispatch({
@@ -219,7 +234,19 @@ function App() {
     setMode(nextMode);
     if (nextMode === "chroma") return;
     if (!state.source) return;
-    setDetecting(nextMode === "comic");
+    if (nextMode === "comic") {
+      setDetecting(false);
+      dispatch({
+        type: "apply",
+        history: false,
+        patch: createComicReadyState(
+          state.source,
+          t.status.modeChanged(t.common.panel),
+        ),
+      });
+      return;
+    }
+    setDetecting(false);
     try {
       const output = await createInitialSegmentation(state.source, nextMode, params, comicParams);
       dispatch({
@@ -260,9 +287,10 @@ function App() {
   }
 
   async function handleAutoDetectComic() {
-    if (!state.source || !state.originalMask || !state.edits) return;
+    if (detecting || !state.source || !state.originalMask || !state.edits) return;
     setDetecting(true);
     try {
+      await waitForNextPaint();
       const result = await detectItems(
         state.source,
         "comic",
@@ -401,10 +429,10 @@ function App() {
 
   function handleExportCurrent() {
     const targets = exportScope === "all" ? state.items : selectedItems;
-    if (targets.length === 1) {
+    if (state.source && targets.length === 1) {
       const customFileName =
         exportScope === "selected" && selectedItems.length === 1 ? exportFileName : undefined;
-      exportSingle(targets[0], customFileName);
+      exportSingle(state.source, targets[0], customFileName);
     }
     else if (state.source && targets.length > 1) void exportZip(state.source, targets, includeMetadata);
   }
@@ -558,6 +586,24 @@ function App() {
 
 function nextId(items: SliceItem[]) {
   return Math.max(0, ...items.map((item) => item.id)) + 1;
+}
+
+function createComicReadyState(source: LoadedImage, status: string) {
+  return {
+    originalMask: createComicContentMask(source.imageData),
+    edits: new Int8Array(source.width * source.height),
+    items: [] as SliceItem[],
+    selectedIds: [] as number[],
+    status,
+  };
+}
+
+function waitForNextPaint() {
+  return new Promise<void>((resolve) => {
+    window.requestAnimationFrame(() => {
+      window.requestAnimationFrame(() => resolve());
+    });
+  });
 }
 
 function readPreference<T extends string>(key: string, fallback: T, allowed: readonly T[]): T {
