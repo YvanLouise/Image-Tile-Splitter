@@ -1,0 +1,82 @@
+<!doctype html>
+<html lang="zh-CN">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>GitHub 推送控制台</title>
+    <link rel="stylesheet" href="/styles.css" />
+  </head>
+  <body>
+    <main class="shell">
+      <header class="topbar">
+        <div>
+          <h1>GitHub 推送控制台</h1>
+          <p>本地检查、确认提交，然后推送当前项目。</p>
+        </div>
+        <span id="statusBadge" class="badge idle">idle</span>
+      </header>
+
+      <section class="repo-grid" aria-label="仓库信息">
+        <div class="repo-item">
+          <span>远程仓库</span>
+          <strong id="remoteValue">读取中...</strong>
+        </div>
+        <div class="repo-item">
+          <span>当前分支</span>
+          <strong id="branchValue">读取中...</strong>
+        </div>
+        <div class="repo-item">
+          <span>待处理文件</span>
+          <strong id="statusCount">读取中...</strong>
+        </div>
+      </section>
+
+      <section class="control-panel">
+        <label for="commitMessage">提交信息</label>
+        <div class="run-row">
+          <input id="commitMessage" type="text" autocomplete="off" />
+          <button id="startButton" class="primary-button">一键推送 GitHub</button>
+        </div>
+      </section>
+
+      <section id="confirmPanel" class="confirm-panel hidden">
+        <div>
+          <h2>确认提交并推送</h2>
+          <p>检查已通过。确认后将执行 git add、git commit 和 git push。</p>
+        </div>
+        <div class="confirm-actions">
+          <button id="cancelButton" class="secondary-button">取消</button>
+          <button id="confirmButton" class="primary-button">确认提交并推送</button>
+        </div>
+      </section>
+
+      <section class="changes-panel">
+        <div class="panel-title">
+          <h2>变更列表</h2>
+          <button id="refreshButton" class="secondary-button">刷新</button>
+        </div>
+        <pre id="changesOutput" class="changes-output">暂无数据</pre>
+      </section>
+
+      <section class="logs-grid">
+        <article class="log-panel">
+          <div class="panel-title">
+            <h2>正常日志</h2>
+            <button id="clearNormalButton" class="secondary-button">清空</button>
+          </div>
+          <pre id="normalLog" class="log-output">等待运行</pre>
+        </article>
+
+        <article class="log-panel error-panel">
+          <div class="panel-title">
+            <h2>错误日志</h2>
+            <button id="copyErrorButton" class="secondary-button">复制错误日志</button>
+          </div>
+          <pre id="errorLog" class="log-output">暂无错误</pre>
+        </article>
+      </section>
+    </main>
+
+    <script src="/app.js" type="module"></script>
+  </body>
+</html>
