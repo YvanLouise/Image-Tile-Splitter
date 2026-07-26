@@ -22,6 +22,13 @@ export const translations = {
       source: "来源",
       confidence: "置信度",
     },
+    zoomReminder: {
+      title: "建议调整浏览器缩放",
+      description: "当前可用宽度较小。为完整显示工作区，建议将浏览器缩放调整为 75%。",
+      shortcut: "Ctrl + -  调整至 75%",
+      continue: "继续使用",
+      adjusted: "我已调整",
+    },
     toolbar: {
       modeSwitch: "模式切换",
       toolStrip: "编辑工具",
@@ -245,6 +252,13 @@ export const translations = {
       pixels: "pixels",
       source: "Source",
       confidence: "Confidence",
+    },
+    zoomReminder: {
+      title: "Browser zoom recommended",
+      description: "The available width is limited. Set browser zoom to 75% to keep the workspace fully visible.",
+      shortcut: "Ctrl + -  Adjust to 75%",
+      continue: "Continue anyway",
+      adjusted: "I've adjusted it",
     },
     toolbar: {
       modeSwitch: "Mode switch",

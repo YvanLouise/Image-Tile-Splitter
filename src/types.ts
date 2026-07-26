@@ -61,6 +61,10 @@ export interface ChromaKeyResult {
   maskUrl: string;
   foregroundPixels: number;
   totalPixels: number;
+  previewWidth?: number;
+  previewHeight?: number;
+  resultData?: Uint8ClampedArray;
+  maskData?: Uint8ClampedArray;
 }
 
 export type PanelDetectionSource = "opencv" | "manual" | "fallback";

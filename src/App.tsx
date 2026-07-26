@@ -50,6 +50,9 @@ const defaultParams: SegmentParams = {
   minPixels: 20,
 };
 
+const zoomReminderDismissKey = "image-splitter-zoom-reminder-dismissed";
+const zoomReminderMinWidth = 1280;
+
 function App() {
   const fileInputRef = useRef<HTMLInputElement | null>(null);
   const saveQueueRef = useRef<Promise<void>>(Promise.resolve());
@@ -64,6 +67,7 @@ function App() {
     readPreference("layout", "classic", ["classic", "focus"]),
   );
   const [helpOpen, setHelpOpen] = useState(false);
+  const [zoomReminderOpen, setZoomReminderOpen] = useState(false);
   const [mode, setMode] = useState<AppMode>("transparent");
   const [tool, setTool] = useState<ToolMode>("select");
   const [params, setParams] = useState<SegmentParams>(defaultParams);
@@ -102,6 +106,26 @@ function App() {
   useEffect(() => {
     localStorage.setItem("image-splitter-layout", layout);
   }, [layout]);
+
+  useEffect(() => {
+    try {
+      if (sessionStorage.getItem(zoomReminderDismissKey)) return;
+    } catch {}
+    const updateReminder = () => {
+      const isDesktop = window.matchMedia("(min-width: 900px) and (pointer: fine)").matches;
+      setZoomReminderOpen(isDesktop && window.innerWidth < zoomReminderMinWidth);
+    };
+    updateReminder();
+    window.addEventListener("resize", updateReminder);
+    return () => window.removeEventListener("resize", updateReminder);
+  }, []);
+
+  function dismissZoomReminder() {
+    try {
+      sessionStorage.setItem(zoomReminderDismissKey, "1");
+    } catch {}
+    setZoomReminderOpen(false);
+  }
 
   useEffect(() => {
     let active = true;
@@ -606,6 +630,34 @@ function App() {
           visitCounter={visitCounter}
           onClose={() => setHelpOpen(false)}
         />
+      )}
+      {zoomReminderOpen && (
+        <div className="modal-backdrop" role="presentation">
+          <section
+            className="zoom-reminder"
+            role="dialog"
+            aria-modal="true"
+            aria-labelledby="zoom-reminder-title"
+          >
+            <div className="modal-header">
+              <div>
+                <h2 id="zoom-reminder-title">{t.zoomReminder.title}</h2>
+                <p>{t.zoomReminder.description}</p>
+              </div>
+            </div>
+            <div className="zoom-reminder-content">
+              <kbd>{t.zoomReminder.shortcut}</kbd>
+            </div>
+            <div className="modal-actions">
+              <button className="secondary" onClick={dismissZoomReminder}>
+                {t.zoomReminder.continue}
+              </button>
+              <button className="primary" onClick={dismissZoomReminder}>
+                {t.zoomReminder.adjusted}
+              </button>
+            </div>
+          </section>
+        </div>
       )}
     </div>
   );

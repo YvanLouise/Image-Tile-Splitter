@@ -49,6 +49,10 @@ type LoadedPreviewImage = {
   url: string;
   image: HTMLImageElement;
 };
+type PreviewRaster = {
+  result: HTMLCanvasElement;
+  mask: HTMLCanvasElement;
+};
 
 const resultBackgroundSwatches = [
   "#ffffff",
@@ -117,6 +121,14 @@ export function ChromaWorkspace({
       task.promise
         .then((processed) => {
           if (!canceled) setResult(buildChromaKeyPreviewResult(previewInput, processed));
+        })
+        .catch(() => {
+          if (canceled) return;
+          const processed = processChromaKey(
+            previewInput.imageData,
+            scaleChromaParamsForPreview(previewInput, effectiveParams),
+          );
+          setResult(buildChromaKeyPreviewResult(previewInput, processed));
         })
         .finally(() => {
           if (!canceled) setProcessing(false);
@@ -662,6 +674,7 @@ function ChromaCanvas({
   const canvasRef = useRef<HTMLCanvasElement | null>(null);
   const shellRef = useRef<HTMLDivElement | null>(null);
   const previewImagesRef = useRef<Partial<Record<"result" | "mask", LoadedPreviewImage>>>({});
+  const previewRasterRef = useRef<PreviewRaster | null>(null);
   const dragRef = useRef<null | {
     startX: number;
     startY: number;
@@ -688,7 +701,37 @@ function ChromaCanvas({
 
   useEffect(() => {
     previewImagesRef.current = {};
+    previewRasterRef.current = null;
   }, [source]);
+
+  useEffect(() => {
+    if (
+      !result?.resultData
+      || !result.maskData
+      || !result.previewWidth
+      || !result.previewHeight
+    ) {
+      previewRasterRef.current = null;
+      return;
+    }
+    const createRaster = (data: Uint8ClampedArray) => {
+      const raster = document.createElement("canvas");
+      raster.width = result.previewWidth!;
+      raster.height = result.previewHeight!;
+      const context = raster.getContext("2d");
+      if (!context) return null;
+      const imageData = context.createImageData(raster.width, raster.height);
+      imageData.data.set(data);
+      context.putImageData(imageData, 0, 0);
+      return raster;
+    };
+    const resultRaster = createRaster(result.resultData);
+    const maskRaster = createRaster(result.maskData);
+    previewRasterRef.current = resultRaster && maskRaster
+      ? { result: resultRaster, mask: maskRaster }
+      : null;
+    draw();
+  }, [result]);
 
   useEffect(() => {
     if (!source || !result) {
@@ -789,9 +832,14 @@ function ChromaCanvas({
     if (previewMode === "original") {
       ctx.drawImage(source.bitmap, 0, 0);
     } else {
-      const previewImage = previewImagesRef.current[previewMode];
-      if (previewImage) {
-        ctx.drawImage(previewImage.image, 0, 0, source.width, source.height);
+      const previewRaster = previewRasterRef.current?.[previewMode];
+      if (previewRaster) {
+        ctx.drawImage(previewRaster, 0, 0, source.width, source.height);
+      } else {
+        const previewImage = previewImagesRef.current[previewMode];
+        if (previewImage) {
+          ctx.drawImage(previewImage.image, 0, 0, source.width, source.height);
+        }
       }
     }
     ctx.restore();

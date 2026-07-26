@@ -479,6 +479,10 @@ export function renderChromaKeyResult(
     maskUrl: pixelsToDataUrl(imageData.width, imageData.height, processed.maskData),
     foregroundPixels: processed.foregroundPixels,
     totalPixels: processed.totalPixels,
+    previewWidth: imageData.width,
+    previewHeight: imageData.height,
+    resultData: processed.resultData,
+    maskData: processed.maskData,
   };
 }
 
@@ -533,6 +537,10 @@ export function buildChromaKeyPreviewResult(
     ),
     foregroundPixels: Math.round(processed.foregroundPixels * totalPixels / previewPixels),
     totalPixels,
+    previewWidth: preview.imageData.width,
+    previewHeight: preview.imageData.height,
+    resultData: processed.resultData,
+    maskData: processed.maskData,
   };
 }
 

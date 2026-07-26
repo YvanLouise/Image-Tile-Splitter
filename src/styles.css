@@ -1000,6 +1000,31 @@ select {
   animation: modal-in var(--motion-standard) var(--motion-ease) both;
 }
 
+.zoom-reminder {
+  width: min(440px, calc(100vw - 40px));
+  overflow: hidden;
+  border: 1px solid var(--line);
+  border-radius: 10px;
+  background: var(--panel-bg);
+  box-shadow: 0 24px 70px rgba(0, 0, 0, 0.28);
+  animation: modal-in var(--motion-standard) var(--motion-ease) both;
+}
+
+.zoom-reminder-content {
+  padding: 18px 22px;
+}
+
+.zoom-reminder-content kbd {
+  display: inline-flex;
+  padding: 7px 10px;
+  border: 1px solid var(--line);
+  border-radius: 6px;
+  color: var(--heading);
+  background: var(--surface-soft);
+  font-family: ui-monospace, SFMono-Regular, Consolas, monospace;
+  font-size: 12px;
+}
+
 .modal-header {
   padding: 20px 22px 16px;
   border-bottom: 1px solid var(--line);
