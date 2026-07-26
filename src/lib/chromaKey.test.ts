@@ -95,31 +95,78 @@ describe("processChromaKey", () => {
     expect(result.resultData[3]).toBeLessThan(255);
   });
 
-  it("expands the removed background when edge contraction increases", () => {
-    const source = image([[45, 205, 45, 255]]);
+  it("contracts only the outer edge without widening the key color range", () => {
+    const green = [0, 255, 0, 255];
+    const red = [220, 30, 30, 255];
+    const source = imageGrid([
+      [green, green, green, green, green, green, green],
+      [green, red, red, red, red, red, green],
+      [green, red, red, red, red, red, green],
+      [green, red, red, red, red, red, green],
+      [green, red, red, red, red, red, green],
+      [green, red, red, red, red, red, green],
+      [green, green, green, green, green, green, green],
+    ]);
     const base = processChromaKey(source, {
       ...defaultChromaKeyParams,
-      tolerance: 10,
-      softness: 20,
+      tolerance: 0,
+      softness: 0,
       edgeContract: 0,
       despill: 0,
-      outerOnly: false,
+      outerOnly: true,
     });
     const contracted = processChromaKey(source, {
       ...defaultChromaKeyParams,
-      tolerance: 10,
-      softness: 20,
-      edgeContract: 20,
+      tolerance: 0,
+      softness: 0,
+      edgeContract: 2,
       despill: 0,
-      outerOnly: false,
+      outerOnly: true,
     });
-    expect(contracted.resultData[3]).toBeLessThan(base.resultData[3]);
+    const edgeAlpha = (3 * source.width + 1) * 4 + 3;
+    const centerAlpha = (3 * source.width + 3) * 4 + 3;
+    expect(contracted.resultData[edgeAlpha]).toBeLessThan(base.resultData[edgeAlpha]);
+    expect(contracted.resultData[centerAlpha]).toBe(255);
+    const nearGray = processChromaKey(
+      image([[200, 200, 200, 255]]),
+      {
+        ...defaultChromaKeyParams,
+        keyColor: "#cacac8",
+        tolerance: 0,
+        edgeContract: 12,
+        softness: 0,
+        outerOnly: false,
+        despill: 0,
+      },
+    );
+    expect(nearGray.resultData[3]).toBe(255);
+    const expandedBackground = processChromaKey(
+      image([[200, 200, 200, 255]]),
+      {
+        ...defaultChromaKeyParams,
+        keyColor: "#cacac8",
+        tolerance: 0,
+        backgroundExpand: 12,
+        edgeContract: 0,
+        softness: 0,
+        outerOnly: false,
+        despill: 0,
+      },
+    );
+    expect(expandedBackground.resultData[3]).toBe(0);
   });
 
-  it("removes near-white antialiasing with the default edge cleanup", () => {
+  it("removes near-white antialiasing when tolerance includes it", () => {
     const result = processChromaKey(
       image([[200, 200, 200, 255]]),
-      { ...defaultChromaKeyParams, keyColor: "#ffffff", despill: 0 },
+      {
+        ...defaultChromaKeyParams,
+        keyColor: "#ffffff",
+        tolerance: 32,
+        softness: 0,
+        outerOnly: false,
+        despill: 0,
+      },
     );
     expect(result.resultData[3]).toBe(0);
   });
@@ -143,12 +190,14 @@ describe("processChromaKey", () => {
       tolerance: 20,
       softness: 70,
       despill: 0,
+      outerOnly: false,
     });
     const despilled = processChromaKey(source, {
       ...defaultChromaKeyParams,
       tolerance: 20,
       softness: 70,
       despill: 100,
+      outerOnly: false,
     });
     expect(despilled.resultData[1]).toBeLessThan(plain.resultData[1]);
   });

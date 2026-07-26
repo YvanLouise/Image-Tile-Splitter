@@ -29,7 +29,8 @@ export const defaultChromaKeyParams: ChromaKeyParams = {
   excludeTolerance: 12,
   tolerance: 26,
   softness: 18,
-  edgeContract: 6,
+  backgroundExpand: 0,
+  edgeContract: 0,
   despill: 55,
   invert: false,
   outerOnly: true,
@@ -47,8 +48,9 @@ export function processChromaKey(
   const [keyR, keyG, keyB] = hexToRgb(normalizedParams.keyColor);
   const keyLab = rgbToLab(keyR, keyG, keyB);
   const excludeTolerance = Math.max(0, normalizedParams.excludeTolerance);
-  const threshold = Math.max(0, normalizedParams.tolerance + normalizedParams.edgeContract);
+  const threshold = Math.max(0, normalizedParams.tolerance + normalizedParams.backgroundExpand);
   const softness = Math.max(0, normalizedParams.softness);
+  const edgeContract = normalizedParams.edgeContract;
   const low = Math.max(0, threshold - softness / 2);
   const high = threshold + softness / 2;
   const despillStrength = clamp01(normalizedParams.despill / 100);
@@ -90,18 +92,32 @@ export function processChromaKey(
       : 0;
   }
 
-  const outerMask = normalizedParams.outerOnly
+  const canContractOuterEdge = !normalizedParams.invert && edgeContract > 0;
+  const outerBackground = normalizedParams.outerOnly || canContractOuterEdge
+    ? traceOuterRemovablePixels(
+        normalizedParams.invert ? removableByPixel : backgroundCoreByPixel,
+        imageData.width,
+        imageData.height,
+        normalizedParams.outerMode,
+        normalizedParams.samplePoint,
+      )
+    : null;
+  const outerMask = normalizedParams.outerOnly && outerBackground
     ? expandOuterMask(
-        traceOuterRemovablePixels(
-          normalizedParams.invert ? removableByPixel : backgroundCoreByPixel,
-          imageData.width,
-          imageData.height,
-          normalizedParams.outerMode,
-          normalizedParams.samplePoint,
-        ),
+        outerBackground,
         removableByPixel,
         imageData.width,
         imageData.height,
+      )
+    : null;
+  const edgeContractResult = outerBackground && canContractOuterEdge
+    ? contractOuterEdge(
+        alphaByPixel,
+        outerBackground,
+        excludedByPixel,
+        imageData.width,
+        imageData.height,
+        edgeContract,
       )
     : null;
 
@@ -111,8 +127,12 @@ export function processChromaKey(
     const b = imageData.data[offset + 2];
     const sourceAlphaByte = imageData.data[offset + 3];
     const shouldApplyKey = excludedByPixel[pixel] === 0
-      && (!outerMask || outerMask[pixel] === 1);
-    const outputAlpha = shouldApplyKey ? alphaByPixel[pixel] : sourceAlphaByte;
+      && (!outerMask
+        || outerMask[pixel] === 1
+        || edgeContractResult?.affectedByPixel[pixel] === 1);
+    const outputAlpha = shouldApplyKey
+      ? (edgeContractResult?.alphaByPixel[pixel] ?? alphaByPixel[pixel])
+      : sourceAlphaByte;
     const alpha = outputAlpha / 255;
 
     const edgeAmount = (1 - alpha) * despillStrength;
@@ -144,10 +164,24 @@ function normalizeChromaParams(params: ChromaKeyParams): ChromaKeyParams {
     ...params,
     excludedColors: normalizeExcludedColors(params.excludedColors),
     excludeTolerance: params.excludeTolerance ?? defaultChromaKeyParams.excludeTolerance,
+    backgroundExpand: normalizeBackgroundExpand(params.backgroundExpand),
+    edgeContract: normalizeEdgeContract(params.edgeContract),
     outerOnly: params.outerOnly ?? defaultChromaKeyParams.outerOnly,
     outerMode: params.outerMode ?? defaultChromaKeyParams.outerMode,
     samplePoint: params.samplePoint,
   };
+}
+
+function normalizeEdgeContract(value: number | undefined) {
+  const contract = typeof value === "number" && Number.isFinite(value)
+    ? Math.round(value)
+    : defaultChromaKeyParams.edgeContract;
+  return Math.max(0, Math.min(12, contract));
+}
+
+function normalizeBackgroundExpand(value: number | undefined) {
+  const expand = typeof value === "number" && Number.isFinite(value) ? Math.round(value) : 0;
+  return Math.max(0, Math.min(40, expand));
 }
 
 function normalizeExcludedColors(value: unknown): ChromaExcludedColor[] {
@@ -311,6 +345,61 @@ function expandOuterMask(
     }
   }
   return expanded;
+}
+
+function contractOuterEdge(
+  alphaByPixel: Uint8ClampedArray,
+  outerBackground: Uint8Array,
+  excludedByPixel: Uint8Array,
+  width: number,
+  height: number,
+  radius: number,
+) {
+  const contractedAlphaByPixel = new Uint8ClampedArray(alphaByPixel);
+  const affectedByPixel = new Uint8Array(alphaByPixel.length);
+  const distances = new Int16Array(alphaByPixel.length);
+  distances.fill(-1);
+  const queue = new Int32Array(alphaByPixel.length);
+  let queueStart = 0;
+  let queueEnd = 0;
+
+  for (let index = 0; index < outerBackground.length; index += 1) {
+    if (outerBackground[index] !== 1 || excludedByPixel[index] === 1) continue;
+    distances[index] = 0;
+    queue[queueEnd] = index;
+    queueEnd += 1;
+  }
+
+  while (queueStart < queueEnd) {
+    const index = queue[queueStart];
+    queueStart += 1;
+    const distance = distances[index];
+    if (distance >= radius) continue;
+    const x = index % width;
+    const y = Math.floor(index / width);
+    for (let dy = -1; dy <= 1; dy += 1) {
+      for (let dx = -1; dx <= 1; dx += 1) {
+        if (dx === 0 && dy === 0) continue;
+        const nextX = x + dx;
+        const nextY = y + dy;
+        if (nextX < 0 || nextX >= width || nextY < 0 || nextY >= height) continue;
+        const next = nextY * width + nextX;
+        if (distances[next] !== -1 || excludedByPixel[next] === 1) continue;
+        const nextDistance = distance + 1;
+        distances[next] = nextDistance;
+        queue[queueEnd] = next;
+        queueEnd += 1;
+        const factor = Math.max(0, Math.min(1, (nextDistance - 0.5) / radius));
+        const nextAlpha = Math.round(alphaByPixel[next] * factor);
+        if (nextAlpha < alphaByPixel[next]) {
+          contractedAlphaByPixel[next] = nextAlpha;
+          affectedByPixel[next] = 1;
+        }
+      }
+    }
+  }
+
+  return { alphaByPixel: contractedAlphaByPixel, affectedByPixel };
 }
 
 export function getChromaPreviewDimensions(

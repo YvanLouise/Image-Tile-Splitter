@@ -210,6 +210,12 @@ function normalizeStoredChromaParams(params: Partial<ChromaKeyParams>): ChromaKe
         }).slice(0, 8)
       : defaultChromaKeyParams.excludedColors,
     excludeTolerance: params.excludeTolerance ?? defaultChromaKeyParams.excludeTolerance,
+    backgroundExpand: typeof params.backgroundExpand === "number" && Number.isFinite(params.backgroundExpand)
+      ? Math.max(0, Math.min(40, Math.round(params.backgroundExpand)))
+      : defaultChromaKeyParams.backgroundExpand,
+    edgeContract: typeof params.edgeContract === "number" && Number.isFinite(params.edgeContract)
+      ? Math.max(0, Math.min(12, Math.round(params.edgeContract)))
+      : defaultChromaKeyParams.edgeContract,
     outerOnly: params.outerOnly ?? defaultChromaKeyParams.outerOnly,
     outerMode: params.outerMode ?? defaultChromaKeyParams.outerMode,
     samplePoint: params.samplePoint,

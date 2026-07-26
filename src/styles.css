@@ -1208,6 +1208,10 @@ input.numeric-value {
   gap: 8px;
 }
 
+.background-expand-hint {
+  margin: -1px 0 3px;
+}
+
 .chroma-canvas-panel {
   grid-template-rows: 78px minmax(0, 1fr) 38px;
 }

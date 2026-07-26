@@ -341,9 +341,17 @@ export function ChromaWorkspace({
             onChange={(value) => updateParam("softness", value)}
           />
           <ChromaSlider
-            label={t.chroma.edgeContract}
-            value={params.edgeContract}
+            label={t.chroma.backgroundExpand}
+            value={Math.max(0, Math.min(40, params.backgroundExpand))}
             max={40}
+            onChange={(value) => updateParam("backgroundExpand", value)}
+          />
+          <p className="mode-note background-expand-hint">{t.chroma.backgroundExpandHint}</p>
+          <ChromaSlider
+            label={t.chroma.edgeContract}
+            value={Math.max(0, Math.min(12, params.edgeContract))}
+            max={12}
+            suffix="px"
             onChange={(value) => updateParam("edgeContract", value)}
           />
           <ChromaSlider

@@ -44,6 +44,7 @@ export interface ChromaKeyParams {
   excludeTolerance: number;
   tolerance: number;
   softness: number;
+  backgroundExpand: number;
   edgeContract: number;
   despill: number;
   invert: boolean;
