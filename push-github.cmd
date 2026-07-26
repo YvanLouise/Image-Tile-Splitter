@@ -3,26 +3,14 @@ setlocal EnableExtensions
 
 cd /d "%~dp0"
 
-echo.
-echo === Image Tile Splitter: GitHub push web console ===
-echo.
+set "CONSOLE_LAUNCHER=%~dp0GitHub推送控制台\一键打开GitHub推送控制台.cmd"
 
-node --version >nul 2>nul
-if errorlevel 1 (
-  echo Node.js is not installed or not available in PATH.
-  echo.
-  echo Script stopped. This window will stay open; close it manually when you are done.
-  cmd /k
+if not exist "%CONSOLE_LAUNCHER%" (
+  echo [ERROR] GitHub Push Console launcher was not found:
+  echo %CONSOLE_LAUNCHER%
+  pause
   exit /b 1
 )
 
-echo Starting local push console...
-echo Close this window to stop the local push server.
-echo.
-
-node scripts\push-web\server.mjs --open
-
-echo.
-echo Script stopped. This window will stay open; close it manually when you are done.
-cmd /k
+call "%CONSOLE_LAUNCHER%" %*
 exit /b %ERRORLEVEL%

@@ -7,6 +7,7 @@ import {
   RotateCcw,
   Scissors,
   ScanSearch,
+  Trash2,
 } from "lucide-react";
 import { useRef, useState } from "react";
 import type { UIStrings } from "../i18n";
@@ -37,6 +38,7 @@ interface LeftPanelProps {
   onSelect: (id: number, additive?: boolean) => void;
   onSelectAll: () => void;
   onMoveOrder: (id: number, direction: -1 | 1) => void;
+  onRemove: (id: number) => void;
   onMerge: () => void;
   onSplitSelected: () => void;
 }
@@ -58,6 +60,7 @@ export function LeftPanel({
   onSelect,
   onSelectAll,
   onMoveOrder,
+  onRemove,
   onMerge,
   onSplitSelected,
 }: LeftPanelProps) {
@@ -335,10 +338,19 @@ export function LeftPanel({
           {items.map((item) => {
             const selected = selectedIds.includes(item.id);
             return (
-              <button
+              <div
                 key={item.id}
                 className={selected ? "slice-card selected" : "slice-card"}
+                role="button"
+                tabIndex={0}
                 onClick={(event) => onSelect(item.id, event.ctrlKey || event.metaKey)}
+                onKeyDown={(event) => {
+                  if (event.target !== event.currentTarget) return;
+                  if (event.key === "Enter" || event.key === " ") {
+                    event.preventDefault();
+                    onSelect(item.id);
+                  }
+                }}
               >
                 <img src={item.previewUrl} alt="" />
                 <strong>
@@ -375,8 +387,22 @@ export function LeftPanel({
                   >
                     ↓
                   </button>
+                  {mode === "transparent" ? (
+                    <button
+                      className="remove-item-button"
+                      type="button"
+                      title={t.left.remove}
+                      aria-label={t.left.remove}
+                      onClick={(event) => {
+                        event.stopPropagation();
+                        onRemove(item.id);
+                      }}
+                    >
+                      <Trash2 size={13} />
+                    </button>
+                  ) : null}
                 </div>
-              </button>
+              </div>
             );
           })}
         </div>

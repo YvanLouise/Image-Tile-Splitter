@@ -120,6 +120,30 @@ export function CanvasWorkspace({
     };
   }
 
+  function handleWheel(event: {
+    preventDefault: () => void;
+    currentTarget: HTMLCanvasElement;
+    clientX: number;
+    clientY: number;
+    deltaY: number;
+  }) {
+    event.preventDefault();
+    if (!source) return;
+
+    const rect = event.currentTarget.getBoundingClientRect();
+    const pointerX = event.clientX - rect.left;
+    const pointerY = event.clientY - rect.top;
+    const nextZoom = Math.max(0.05, Math.min(4, zoom * (event.deltaY > 0 ? 0.9 : 1.1)));
+    const imageX = (pointerX - pan.x) / zoom;
+    const imageY = (pointerY - pan.y) / zoom;
+
+    onZoomChange(nextZoom);
+    onPanChange({
+      x: pointerX - imageX * nextZoom,
+      y: pointerY - imageY * nextZoom,
+    });
+  }
+
   function handlePointerDown(event: React.PointerEvent<HTMLCanvasElement>) {
     if (!source) return;
     event.currentTarget.setPointerCapture(event.pointerId);
@@ -260,6 +284,7 @@ export function CanvasWorkspace({
       <div ref={shellRef} className="canvas-shell">
         <canvas
           ref={canvasRef}
+          onWheel={handleWheel}
           onPointerDown={handlePointerDown}
           onPointerMove={handlePointerMove}
           onPointerUp={handlePointerUp}

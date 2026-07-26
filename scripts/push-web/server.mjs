@@ -24,6 +24,7 @@ const contentTypes = new Map([
 const runs = new Map();
 let activeRunId = null;
 let nextRunId = 1;
+let browserOpened = false;
 
 const server = createServer((request, response) => {
   void handleRequest(request, response).catch((error) => {
@@ -33,6 +34,13 @@ const server = createServer((request, response) => {
   });
 });
 
+const existingConsoleUrl = shouldOpen ? await findExistingConsoleUrl() : null;
+if (existingConsoleUrl) {
+  console.log(`GitHub push console is already running at ${existingConsoleUrl}`);
+  openBrowserOnce(existingConsoleUrl);
+  process.exit(0);
+}
+
 listenWithFallback(START_PORT);
 
 async function handleRequest(request, response) {
@@ -40,6 +48,14 @@ async function handleRequest(request, response) {
 
   if (request.method === "GET" && url.pathname === "/api/repo") {
     sendJson(response, 200, await getRepoInfo());
+    return;
+  }
+
+  if (request.method === "GET" && url.pathname === "/api/health") {
+    sendJson(response, 200, {
+      app: "image-splitter-push-console",
+      ok: true,
+    });
     return;
   }
 
@@ -517,8 +533,44 @@ function listenWithFallback(port) {
     const url = `http://127.0.0.1:${port}/`;
     console.log(`GitHub push console running at ${url}`);
     console.log("Close this window to stop the local push server.");
-    if (shouldOpen) openBrowser(url);
+    if (shouldOpen) openBrowserOnce(url);
   });
+}
+
+async function findExistingConsoleUrl() {
+  for (let port = START_PORT; port <= END_PORT; port += 1) {
+    const url = `http://127.0.0.1:${port}`;
+    try {
+      const response = await fetch(`${url}/api/health`, {
+        signal: AbortSignal.timeout(300),
+      });
+      if (response.ok && (await response.json()).app === "image-splitter-push-console") {
+        return `${url}/`;
+      }
+    } catch {
+      // Fall back to probing the page for older push console servers.
+    }
+
+    try {
+      const response = await fetch(`${url}/`, {
+        signal: AbortSignal.timeout(300),
+      });
+      if (!response.ok) continue;
+      const html = await response.text();
+      if (html.includes("<title>GitHub 推送控制台</title>")) {
+        return `${url}/`;
+      }
+    } catch {
+      // Port is unused or belongs to another service.
+    }
+  }
+  return null;
+}
+
+function openBrowserOnce(url) {
+  if (browserOpened) return;
+  browserOpened = true;
+  openBrowser(url);
 }
 
 function openBrowser(url) {

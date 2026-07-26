@@ -189,6 +189,27 @@ function normalizeStoredChromaParams(params: Partial<ChromaKeyParams>): ChromaKe
   return {
     ...defaultChromaKeyParams,
     ...params,
+    excludedColors: Array.isArray(params.excludedColors)
+      ? params.excludedColors.flatMap((excluded) => {
+        if (!excluded || typeof excluded !== "object") return [];
+        const item = excluded as { color?: unknown; point?: { x?: unknown; y?: unknown } };
+        const point = item.point;
+        if (
+          typeof item.color !== "string"
+          || !/^#[0-9a-f]{6}$/i.test(item.color)
+          || !Number.isFinite(point?.x)
+          || !Number.isFinite(point?.y)
+          || !point
+        ) {
+          return [];
+        }
+        return [{
+          color: item.color.toLowerCase(),
+          point: { x: Number(point.x), y: Number(point.y) },
+        }];
+        }).slice(0, 8)
+      : defaultChromaKeyParams.excludedColors,
+    excludeTolerance: params.excludeTolerance ?? defaultChromaKeyParams.excludeTolerance,
     outerOnly: params.outerOnly ?? defaultChromaKeyParams.outerOnly,
     outerMode: params.outerMode ?? defaultChromaKeyParams.outerMode,
     samplePoint: params.samplePoint,

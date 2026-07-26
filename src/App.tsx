@@ -39,6 +39,7 @@ import type {
   SegmentParams,
   SliceItem,
   ToolMode,
+  WorkspaceLayout,
 } from "./types";
 import { fileToLoadedImage } from "./utils/canvas";
 import "./styles.css";
@@ -58,6 +59,9 @@ function App() {
   );
   const [theme, setTheme] = useState<ThemeMode>(() =>
     readPreference("theme", "light", ["light", "dark"]),
+  );
+  const [layout, setLayout] = useState<WorkspaceLayout>(() =>
+    readPreference("layout", "classic", ["classic", "focus"]),
   );
   const [helpOpen, setHelpOpen] = useState(false);
   const [mode, setMode] = useState<AppMode>("transparent");
@@ -94,6 +98,10 @@ function App() {
   useEffect(() => {
     localStorage.setItem("image-splitter-theme", theme);
   }, [theme]);
+
+  useEffect(() => {
+    localStorage.setItem("image-splitter-layout", layout);
+  }, [layout]);
 
   useEffect(() => {
     let active = true;
@@ -328,6 +336,22 @@ function App() {
     });
   }
 
+  function handleRemoveItem(id: number) {
+    if (!state.items.some((item) => item.id === id)) return;
+    const items = state.items
+      .filter((item) => item.id !== id)
+      .map((item, order) => ({ ...item, order }));
+    dispatch({
+      type: "apply",
+      history: true,
+      patch: {
+        items,
+        selectedIds: state.selectedIds.filter((selectedId) => selectedId !== id),
+        status: t.status.removed,
+      },
+    });
+  }
+
   function handleMerge() {
     if (!state.source || selectedItems.length < 2) return;
     const merged = mergeItems(
@@ -471,7 +495,7 @@ function App() {
   }
 
   return (
-    <div className="app-shell" data-theme={theme}>
+    <div className="app-shell" data-theme={theme} data-layout={layout}>
       <input
         ref={fileInputRef}
         className="hidden-input"
@@ -489,12 +513,14 @@ function App() {
         t={t}
         language={language}
         theme={theme}
+        layout={layout}
         canUndo={state.undoStack.length > 0}
         canRedo={state.redoStack.length > 0}
         onModeChange={(nextMode) => void handleModeChange(nextMode)}
         onToolChange={setTool}
         onLanguageChange={setLanguage}
         onThemeToggle={() => setTheme((current) => (current === "light" ? "dark" : "light"))}
+        onLayoutChange={setLayout}
         onHelpClick={() => setHelpOpen(true)}
         onUploadClick={() => fileInputRef.current?.click()}
         onUndo={() => dispatch({ type: "undo" })}
@@ -527,6 +553,7 @@ function App() {
             onSelect={(id, additive) => dispatch({ type: "select", id, additive })}
             onSelectAll={() => dispatch({ type: "selectAll" })}
             onMoveOrder={handleMoveOrder}
+            onRemove={handleRemoveItem}
             onMerge={handleMerge}
             onSplitSelected={handleSplitSelected}
           />

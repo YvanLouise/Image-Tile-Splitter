@@ -6,14 +6,14 @@
   "scripts": {
     "dev": "vite --host 127.0.0.1",
     "build": "tsc --noEmit && vite build",
-    "test": "vitest run",
+    "test": "vitest run src",
     "postinstall": "node scripts/copy-opencv.mjs",
     "prepare:github": "node scripts/prepare-github-pages.mjs",
     "preview": "vite preview --host 127.0.0.1",
     "serve:dist": "node scripts/serve-dist.mjs",
     "open": "open-web.cmd",
     "push": "push-github.cmd",
-    "push:web": "node scripts/push-web/server.mjs --open"
+    "push:web": "push-github.cmd"
   },
   "dependencies": {
     "@vitejs/plugin-react": "^5.0.0",

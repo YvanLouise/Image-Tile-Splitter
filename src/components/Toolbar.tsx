@@ -14,11 +14,16 @@ import {
   Sun,
   Undo2,
   Redo2,
+  Settings2,
+  PanelLeft,
   Waypoints,
 } from "lucide-react";
-import type { ComponentType } from "react";
+import { useState, type ComponentType } from "react";
+import appIconUrl from "../../icon/YL图块分离工具icon.png";
+import bilibiliIconUrl from "../../icon/作者B站icon.png";
+import githubIconUrl from "../../icon/YLGitHubIco.png";
 import type { Language, ThemeMode, UIStrings } from "../i18n";
-import type { AppMode, ToolMode } from "../types";
+import type { AppMode, ToolMode, WorkspaceLayout } from "../types";
 
 interface ToolbarProps {
   mode: AppMode;
@@ -26,12 +31,14 @@ interface ToolbarProps {
   t: UIStrings;
   language: Language;
   theme: ThemeMode;
+  layout: WorkspaceLayout;
   canUndo: boolean;
   canRedo: boolean;
   onModeChange: (mode: AppMode) => void;
   onToolChange: (tool: ToolMode) => void;
   onLanguageChange: (language: Language) => void;
   onThemeToggle: () => void;
+  onLayoutChange: (layout: WorkspaceLayout) => void;
   onHelpClick: () => void;
   onUploadClick: () => void;
   onUndo: () => void;
@@ -54,30 +61,53 @@ export function Toolbar({
   t,
   language,
   theme,
+  layout,
   canUndo,
   canRedo,
   onModeChange,
   onToolChange,
   onLanguageChange,
   onThemeToggle,
+  onLayoutChange,
   onHelpClick,
   onUploadClick,
   onUndo,
   onRedo,
 }: ToolbarProps) {
-  const ThemeIcon = theme === "dark" ? Sun : Moon;
+  const [settingsOpen, setSettingsOpen] = useState(false);
 
   return (
     <header className="app-header">
       <div className="brand">
-        <div className="brand-mark">
-          <span />
-          <span />
-        </div>
-        <div>
+        <img className="brand-app-icon" src={appIconUrl} alt="" />
+        <div className="brand-copy">
           <h1>{t.common.appName}</h1>
           <p>{t.common.appSubtitle}</p>
         </div>
+        <nav className="author-links" aria-label="作者链接">
+          <a
+            className="author-link bilibili-link"
+            href="https://space.bilibili.com/190749586"
+            target="_blank"
+            rel="noopener noreferrer"
+            title="作者B站"
+            aria-label="打开作者B站主页"
+          >
+            <img src={bilibiliIconUrl} alt="" />
+            <span>作者B站</span>
+          </a>
+          <a
+            className="author-link github-link"
+            href="https://github.com/YvanLouise/Image-Tile-Splitter"
+            target="_blank"
+            rel="noopener noreferrer"
+            title="GitHub"
+            aria-label="打开 GitHub 项目主页"
+          >
+            <img src={githubIconUrl} alt="" />
+            <span>GitHub</span>
+          </a>
+        </nav>
       </div>
 
       <div className="header-center">
@@ -138,10 +168,64 @@ export function Toolbar({
           <HelpCircle size={17} />
           {t.common.help}
         </button>
-        <button className="ghost-action" title={t.toolbar.appearance} onClick={onThemeToggle}>
-          <ThemeIcon size={17} />
-          {theme === "dark" ? t.common.lightTheme : t.common.darkTheme}
-        </button>
+        <div className="appearance-menu">
+          <button
+            className="ghost-action"
+            title={t.toolbar.appearance}
+            aria-expanded={settingsOpen}
+            aria-controls="appearance-settings"
+            onClick={() => setSettingsOpen((open) => !open)}
+          >
+            <Settings2 size={17} />
+            {t.toolbar.appearance}
+          </button>
+          {settingsOpen ? (
+            <div id="appearance-settings" className="appearance-popover">
+              <div className="appearance-group">
+                <span>{t.toolbar.themeLabel}</span>
+                <div className="segmented appearance-segmented">
+                  <button
+                    className={theme === "light" ? "active" : ""}
+                    aria-pressed={theme === "light"}
+                    onClick={() => theme === "dark" && onThemeToggle()}
+                  >
+                    <Sun size={14} />
+                    {t.common.lightTheme}
+                  </button>
+                  <button
+                    className={theme === "dark" ? "active" : ""}
+                    aria-pressed={theme === "dark"}
+                    onClick={() => theme === "light" && onThemeToggle()}
+                  >
+                    <Moon size={14} />
+                    {t.common.darkTheme}
+                  </button>
+                </div>
+              </div>
+              <div className="appearance-group">
+                <span>{t.toolbar.layoutLabel}</span>
+                <div className="segmented appearance-segmented">
+                  <button
+                    className={layout === "classic" ? "active" : ""}
+                    aria-pressed={layout === "classic"}
+                    onClick={() => onLayoutChange("classic")}
+                  >
+                    <PanelLeft size={14} />
+                    {t.toolbar.classicLayout}
+                  </button>
+                  <button
+                    className={layout === "focus" ? "active" : ""}
+                    aria-pressed={layout === "focus"}
+                    onClick={() => onLayoutChange("focus")}
+                  >
+                    <BoxSelect size={14} />
+                    {t.toolbar.focusLayout}
+                  </button>
+                </div>
+              </div>
+            </div>
+          ) : null}
+        </div>
         <label className="language-control" title={t.common.language}>
           <Languages size={17} />
           <select

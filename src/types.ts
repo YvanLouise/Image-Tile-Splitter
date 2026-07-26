@@ -1,4 +1,5 @@
 export type AppMode = "transparent" | "comic" | "chroma";
+export type WorkspaceLayout = "classic" | "focus";
 export type NeighborMode = 4 | 8;
 export type ToolMode =
   | "pan"
@@ -32,8 +33,15 @@ export interface ComicDetectionParams {
   showConfidence: boolean;
 }
 
+export interface ChromaExcludedColor {
+  color: string;
+  point: { x: number; y: number };
+}
+
 export interface ChromaKeyParams {
   keyColor: string;
+  excludedColors: ChromaExcludedColor[];
+  excludeTolerance: number;
   tolerance: number;
   softness: number;
   edgeContract: number;

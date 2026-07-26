@@ -1,4 +1,8 @@
-import type { ChromaKeyParams, ChromaKeyResult } from "../types";
+import type {
+  ChromaExcludedColor,
+  ChromaKeyParams,
+  ChromaKeyResult,
+} from "../types";
 
 interface PixelImageData {
   width: number;
@@ -13,14 +17,22 @@ export interface ChromaPixelResult {
   totalPixels: number;
 }
 
+export interface ChromaPreviewInput {
+  imageData: ImageData;
+  sourceWidth: number;
+  sourceHeight: number;
+}
+
 export const defaultChromaKeyParams: ChromaKeyParams = {
   keyColor: "#00ff00",
+  excludedColors: [],
+  excludeTolerance: 12,
   tolerance: 26,
   softness: 18,
-  edgeContract: 0,
+  edgeContract: 6,
   despill: 55,
   invert: false,
-  outerOnly: false,
+  outerOnly: true,
   outerMode: "canvasEdge",
   livePreview: true,
 };
@@ -34,6 +46,7 @@ export function processChromaKey(
   const normalizedParams = normalizeChromaParams(params);
   const [keyR, keyG, keyB] = hexToRgb(normalizedParams.keyColor);
   const keyLab = rgbToLab(keyR, keyG, keyB);
+  const excludeTolerance = Math.max(0, normalizedParams.excludeTolerance);
   const threshold = Math.max(0, normalizedParams.tolerance + normalizedParams.edgeContract);
   const softness = Math.max(0, normalizedParams.softness);
   const low = Math.max(0, threshold - softness / 2);
@@ -43,31 +56,52 @@ export function processChromaKey(
   const pixelCount = imageData.width * imageData.height;
   const alphaByPixel = new Uint8ClampedArray(pixelCount);
   const removableByPixel = new Uint8Array(pixelCount);
+  const backgroundCoreByPixel = new Uint8Array(pixelCount);
+  const excludedByPixel = traceExcludedColorRegions(
+    imageData,
+    normalizedParams.excludedColors,
+    excludeTolerance,
+  );
+  const coreThreshold = Math.max(0, threshold - Math.min(softness * 0.35, 10));
   let foregroundPixels = 0;
 
   for (let offset = 0, pixel = 0; offset < imageData.data.length; offset += 4, pixel += 1) {
     const r = imageData.data[offset];
     const g = imageData.data[offset + 1];
     const b = imageData.data[offset + 2];
-    const sourceAlpha = imageData.data[offset + 3] / 255;
-    const distance = deltaE76(rgbToLab(r, g, b), keyLab);
+    const sourceAlphaByte = imageData.data[offset + 3];
+    const sourceAlpha = sourceAlphaByte / 255;
+    const pixelLab = rgbToLab(r, g, b);
+    const distance = deltaE76(pixelLab, keyLab);
+    const isExcluded = excludedByPixel[pixel] === 1;
     let alpha = softness === 0
       ? Number(distance > threshold)
       : smoothstep(low, high, distance);
     if (normalizedParams.invert) alpha = 1 - alpha;
     alpha *= sourceAlpha;
-    const outputAlpha = Math.round(alpha * 255);
+    const outputAlpha = isExcluded ? sourceAlphaByte : Math.round(alpha * 255);
     alphaByPixel[pixel] = outputAlpha;
-    removableByPixel[pixel] = outputAlpha < imageData.data[offset + 3] ? 1 : 0;
+    removableByPixel[pixel] = !isExcluded && outputAlpha < sourceAlphaByte ? 1 : 0;
+    backgroundCoreByPixel[pixel] = !isExcluded
+      && !normalizedParams.invert
+      && sourceAlpha > 0
+      && distance <= coreThreshold
+      ? 1
+      : 0;
   }
 
   const outerMask = normalizedParams.outerOnly
-    ? traceOuterRemovablePixels(
+    ? expandOuterMask(
+        traceOuterRemovablePixels(
+          normalizedParams.invert ? removableByPixel : backgroundCoreByPixel,
+          imageData.width,
+          imageData.height,
+          normalizedParams.outerMode,
+          normalizedParams.samplePoint,
+        ),
         removableByPixel,
         imageData.width,
         imageData.height,
-        normalizedParams.outerMode,
-        normalizedParams.samplePoint,
       )
     : null;
 
@@ -76,7 +110,8 @@ export function processChromaKey(
     const g = imageData.data[offset + 1];
     const b = imageData.data[offset + 2];
     const sourceAlphaByte = imageData.data[offset + 3];
-    const shouldApplyKey = !outerMask || outerMask[pixel] === 1;
+    const shouldApplyKey = excludedByPixel[pixel] === 0
+      && (!outerMask || outerMask[pixel] === 1);
     const outputAlpha = shouldApplyKey ? alphaByPixel[pixel] : sourceAlphaByte;
     const alpha = outputAlpha / 255;
 
@@ -107,10 +142,100 @@ function normalizeChromaParams(params: ChromaKeyParams): ChromaKeyParams {
   return {
     ...defaultChromaKeyParams,
     ...params,
+    excludedColors: normalizeExcludedColors(params.excludedColors),
+    excludeTolerance: params.excludeTolerance ?? defaultChromaKeyParams.excludeTolerance,
     outerOnly: params.outerOnly ?? defaultChromaKeyParams.outerOnly,
     outerMode: params.outerMode ?? defaultChromaKeyParams.outerMode,
     samplePoint: params.samplePoint,
   };
+}
+
+function normalizeExcludedColors(value: unknown): ChromaExcludedColor[] {
+  if (!Array.isArray(value)) return [];
+  return value.flatMap((item) => {
+    if (!isExcludedColor(item)) return [];
+    return [{
+      color: item.color.toLowerCase(),
+      point: { x: item.point.x, y: item.point.y },
+    }];
+  }).slice(0, 8);
+}
+
+function isExcludedColor(value: unknown): value is ChromaExcludedColor {
+  if (!value || typeof value !== "object") return false;
+  const item = value as Partial<ChromaExcludedColor>;
+  return isHexColor(item.color)
+    && Number.isFinite(item.point?.x)
+    && Number.isFinite(item.point?.y);
+}
+
+function isHexColor(value: unknown): value is string {
+  return typeof value === "string" && /^#[0-9a-f]{6}$/i.test(value);
+}
+
+function traceExcludedColorRegions(
+  imageData: PixelImageData,
+  excludedColors: ChromaExcludedColor[],
+  tolerance: number,
+) {
+  const protectedPixels = new Uint8Array(imageData.width * imageData.height);
+  if (!excludedColors.length) return protectedPixels;
+
+  const visited = new Uint8Array(protectedPixels.length);
+  const queue = new Int32Array(protectedPixels.length);
+  const enqueueNeighbors = (index: number, enqueue: (next: number) => void) => {
+    const x = index % imageData.width;
+    const y = Math.floor(index / imageData.width);
+    for (let dy = -1; dy <= 1; dy += 1) {
+      for (let dx = -1; dx <= 1; dx += 1) {
+        if (dx === 0 && dy === 0) continue;
+        const nextX = x + dx;
+        const nextY = y + dy;
+        if (
+          nextX >= 0
+          && nextX < imageData.width
+          && nextY >= 0
+          && nextY < imageData.height
+        ) {
+          enqueue(nextY * imageData.width + nextX);
+        }
+      }
+    }
+  };
+
+  for (const excluded of excludedColors) {
+    visited.fill(0);
+    const [r, g, b] = hexToRgb(excluded.color);
+    const excludedLab = rgbToLab(r, g, b);
+    let queueStart = 0;
+    let queueEnd = 0;
+    const enqueue = (index: number) => {
+      if (visited[index] === 1) return;
+      visited[index] = 1;
+      const offset = index * 4;
+      if (imageData.data[offset + 3] === 0) return;
+      const pixelLab = rgbToLab(
+        imageData.data[offset],
+        imageData.data[offset + 1],
+        imageData.data[offset + 2],
+      );
+      if (deltaE76(pixelLab, excludedLab) > tolerance) return;
+      queue[queueEnd] = index;
+      queueEnd += 1;
+    };
+
+    const startX = Math.max(0, Math.min(imageData.width - 1, Math.floor(excluded.point.x)));
+    const startY = Math.max(0, Math.min(imageData.height - 1, Math.floor(excluded.point.y)));
+    enqueue(startY * imageData.width + startX);
+    while (queueStart < queueEnd) {
+      const index = queue[queueStart];
+      queueStart += 1;
+      protectedPixels[index] = 1;
+      enqueueNeighbors(index, enqueue);
+    }
+  }
+
+  return protectedPixels;
 }
 
 function traceOuterRemovablePixels(
@@ -150,51 +275,108 @@ function traceOuterRemovablePixels(
     const index = queue[queueStart];
     queueStart += 1;
     const x = index % width;
+    const y = Math.floor(index / width);
     if (x > 0) enqueue(index - 1);
     if (x < width - 1) enqueue(index + 1);
     if (index >= width) enqueue(index - width);
     if (index < removableByPixel.length - width) enqueue(index + width);
+    if (x > 0 && y > 0) enqueue(index - width - 1);
+    if (x < width - 1 && y > 0) enqueue(index - width + 1);
+    if (x > 0 && y < height - 1) enqueue(index + width - 1);
+    if (x < width - 1 && y < height - 1) enqueue(index + width + 1);
   }
 
   return connected;
 }
 
-function scaleImageDataForPreview(
-  imageData: ImageData,
-  params: ChromaKeyParams,
-  maxPreviewEdge: number,
+function expandOuterMask(
+  outerMask: Uint8Array,
+  removableByPixel: Uint8Array,
+  width: number,
+  height: number,
 ) {
-  const maxSourceEdge = Math.max(imageData.width, imageData.height);
-  const scale = maxSourceEdge > 0 ? Math.min(1, maxPreviewEdge / maxSourceEdge) : 1;
-  if (scale >= 1) return { imageData, params };
+  const expanded = new Uint8Array(outerMask);
+  for (let index = 0; index < outerMask.length; index += 1) {
+    if (outerMask[index] === 0 || removableByPixel[index] === 0) continue;
+    const x = index % width;
+    const y = Math.floor(index / width);
+    for (let dy = -1; dy <= 1; dy += 1) {
+      for (let dx = -1; dx <= 1; dx += 1) {
+        const nextX = x + dx;
+        const nextY = y + dy;
+        if (nextX < 0 || nextX >= width || nextY < 0 || nextY >= height) continue;
+        const next = nextY * width + nextX;
+        if (removableByPixel[next] === 1) expanded[next] = 1;
+      }
+    }
+  }
+  return expanded;
+}
 
-  const width = Math.max(1, Math.round(imageData.width * scale));
-  const height = Math.max(1, Math.round(imageData.height * scale));
+export function getChromaPreviewDimensions(
+  sourceWidth: number,
+  sourceHeight: number,
+  maxPreviewEdge = 2048,
+  maxPreviewPixels = 2_000_000,
+) {
+  const width = Math.max(1, Math.floor(sourceWidth));
+  const height = Math.max(1, Math.floor(sourceHeight));
+  const edgeScale = maxPreviewEdge > 0
+    ? maxPreviewEdge / Math.max(width, height)
+    : 1;
+  const pixelScale = maxPreviewPixels > 0
+    ? Math.sqrt(maxPreviewPixels / (width * height))
+    : 1;
+  const scale = Math.min(1, edgeScale, pixelScale);
+  return {
+    width: Math.max(1, Math.round(width * scale)),
+    height: Math.max(1, Math.round(height * scale)),
+  };
+}
+
+export function createChromaKeyPreviewInput(
+  imageData: ImageData,
+  maxPreviewEdge = 2048,
+  maxPreviewPixels = 2_000_000,
+) {
+  const preview = getChromaPreviewDimensions(
+    imageData.width,
+    imageData.height,
+    maxPreviewEdge,
+    maxPreviewPixels,
+  );
+  if (preview.width === imageData.width && preview.height === imageData.height) {
+    return {
+      imageData,
+      sourceWidth: imageData.width,
+      sourceHeight: imageData.height,
+    };
+  }
+
   const sourceCanvas = document.createElement("canvas");
   sourceCanvas.width = imageData.width;
   sourceCanvas.height = imageData.height;
   const sourceCtx = sourceCanvas.getContext("2d");
   const targetCanvas = document.createElement("canvas");
-  targetCanvas.width = width;
-  targetCanvas.height = height;
+  targetCanvas.width = preview.width;
+  targetCanvas.height = preview.height;
   const targetCtx = targetCanvas.getContext("2d", { willReadFrequently: true });
-  if (!sourceCtx || !targetCtx) return { imageData, params };
+  if (!sourceCtx || !targetCtx) {
+    return {
+      imageData,
+      sourceWidth: imageData.width,
+      sourceHeight: imageData.height,
+    };
+  }
 
   sourceCtx.putImageData(imageData, 0, 0);
   targetCtx.imageSmoothingEnabled = true;
-  targetCtx.imageSmoothingQuality = "medium";
-  targetCtx.drawImage(sourceCanvas, 0, 0, width, height);
+  targetCtx.imageSmoothingQuality = "high";
+  targetCtx.drawImage(sourceCanvas, 0, 0, preview.width, preview.height);
   return {
-    imageData: targetCtx.getImageData(0, 0, width, height),
-    params: {
-      ...params,
-      samplePoint: params.samplePoint
-        ? {
-            x: params.samplePoint.x * scale,
-            y: params.samplePoint.y * scale,
-          }
-        : undefined,
-    },
+    imageData: targetCtx.getImageData(0, 0, preview.width, preview.height),
+    sourceWidth: imageData.width,
+    sourceHeight: imageData.height,
   };
 }
 
@@ -212,13 +394,42 @@ export function renderChromaKeyResult(
 }
 
 export function renderChromaKeyPreview(
-  imageData: ImageData,
+  preview: ChromaPreviewInput,
   params: ChromaKeyParams,
-  maxPreviewEdge = 900,
 ): ChromaKeyResult {
-  const preview = scaleImageDataForPreview(imageData, params, maxPreviewEdge);
-  const processed = processChromaKey(preview.imageData, preview.params);
-  const totalPixels = imageData.width * imageData.height;
+  const processed = processChromaKey(preview.imageData, scaleChromaParamsForPreview(preview, params));
+  return buildChromaKeyPreviewResult(preview, processed);
+}
+
+export function scaleChromaParamsForPreview(
+  preview: ChromaPreviewInput,
+  params: ChromaKeyParams,
+): ChromaKeyParams {
+  const scaleX = preview.imageData.width / preview.sourceWidth;
+  const scaleY = preview.imageData.height / preview.sourceHeight;
+  return {
+    ...params,
+    excludedColors: params.excludedColors.map((excluded) => ({
+      ...excluded,
+      point: {
+        x: excluded.point.x * scaleX,
+        y: excluded.point.y * scaleY,
+      },
+    })),
+    samplePoint: params.samplePoint
+      ? {
+          x: params.samplePoint.x * scaleX,
+          y: params.samplePoint.y * scaleY,
+        }
+      : undefined,
+  };
+}
+
+export function buildChromaKeyPreviewResult(
+  preview: ChromaPreviewInput,
+  processed: ChromaPixelResult,
+): ChromaKeyResult {
+  const totalPixels = preview.sourceWidth * preview.sourceHeight;
   const previewPixels = preview.imageData.width * preview.imageData.height || 1;
   return {
     resultUrl: pixelsToDataUrl(
@@ -241,7 +452,7 @@ export async function renderChromaKeyExportBlob(
   params: ChromaKeyParams,
 ) {
   const processed = processChromaKey(imageData, params);
-  return pixelsToBlob(imageData.width, imageData.height, processed.resultData);
+  return chromaPixelsToBlob(imageData.width, imageData.height, processed.resultData);
 }
 
 export function sampleHexColor(imageData: PixelImageData, x: number, y: number) {
@@ -279,7 +490,7 @@ function pixelsToDataUrl(width: number, height: number, data: Uint8ClampedArray)
   return canvas.toDataURL("image/png");
 }
 
-function pixelsToBlob(width: number, height: number, data: Uint8ClampedArray) {
+export function chromaPixelsToBlob(width: number, height: number, data: Uint8ClampedArray) {
   return new Promise<Blob>((resolve) => {
     const canvas = document.createElement("canvas");
     canvas.width = width;
