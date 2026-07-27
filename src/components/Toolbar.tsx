@@ -16,6 +16,7 @@ import {
   Redo2,
   Settings2,
   PanelLeft,
+  ScanSearch,
   Waypoints,
 } from "lucide-react";
 import { useState, type ComponentType } from "react";
@@ -51,6 +52,7 @@ const tools: Array<{ id: ToolMode; labelKey: keyof UIStrings["toolbar"]["tools"]
   { id: "splitLine", labelKey: "splitLine", icon: ScissorsLineDashed },
   { id: "eraser", labelKey: "eraser", icon: Eraser },
   { id: "restore", labelKey: "restore", icon: Paintbrush },
+  { id: "rangeExtract", labelKey: "rangeExtract", icon: ScanSearch },
   { id: "rect", labelKey: "rect", icon: PenLine },
   { id: "polygon", labelKey: "polygon", icon: Waypoints },
 ];
@@ -135,7 +137,7 @@ export function Toolbar({
 
         {mode !== "chroma" && (
           <div className="tool-strip" aria-label={t.toolbar.toolStrip}>
-            {tools.map((item) => {
+            {tools.filter((item) => mode === "transparent" || item.id !== "rangeExtract").map((item) => {
               const Icon = item.icon;
               const label = t.toolbar.tools[item.labelKey];
               return (

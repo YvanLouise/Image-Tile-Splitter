@@ -8,7 +8,8 @@ export type ToolMode =
   | "eraser"
   | "restore"
   | "rect"
-  | "polygon";
+  | "polygon"
+  | "rangeExtract";
 
 export interface BoundingBox {
   x: number;

@@ -211,6 +211,31 @@ export function mergeItems(
   });
 }
 
+export function findItemsIntersectingBox(items: SliceItem[], selection: BoundingBox) {
+  const selectionRight = selection.x + selection.width;
+  const selectionBottom = selection.y + selection.height;
+  return items.filter((item) => {
+    const box = item.boundingBox;
+    return (
+      box.x < selectionRight &&
+      box.x + box.width > selection.x &&
+      box.y < selectionBottom &&
+      box.y + box.height > selection.y
+    );
+  });
+}
+
+export function replaceItemsWithMerge(
+  items: SliceItem[],
+  mergedItems: SliceItem[],
+  merged: SliceItem,
+) {
+  const mergedIds = new Set(mergedItems.map((item) => item.id));
+  return [...items.filter((item) => !mergedIds.has(item.id)), merged]
+    .sort((a, b) => a.order - b.order)
+    .map((item, order) => ({ ...item, order }));
+}
+
 export function applyBrushEdit(
   edits: Int8Array,
   width: number,

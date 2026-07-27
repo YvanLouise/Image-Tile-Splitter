@@ -791,6 +791,7 @@ button:not(:disabled):active {
   border: 1px solid var(--line);
   border-radius: 8px;
   overflow: hidden;
+  overscroll-behavior: contain;
   min-height: 360px;
 }
 
@@ -1381,6 +1382,10 @@ input.numeric-value {
 
 .chroma-download {
   margin-top: 14px;
+}
+
+.chroma-export-name {
+  margin-top: 10px;
 }
 
 .chroma-guide ol {

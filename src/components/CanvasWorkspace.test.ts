@@ -1,30 +1,25 @@
 import { describe, expect, it } from "vitest";
-import { shouldDrawDetailedMaskBoundary } from "./CanvasWorkspace";
+import { clampCanvasPan } from "./CanvasWorkspace";
 
-describe("shouldDrawDetailedMaskBoundary", () => {
-  it("uses lightweight outlines when many irregular items are visible", () => {
-    expect(
-      shouldDrawDetailedMaskBoundary(
-        {
-          boundingBox: { x: 0, y: 0, width: 180, height: 160 },
-          pixelCount: 18_000,
-        },
-        false,
-        70,
-      ),
-    ).toBe(false);
+describe("clampCanvasPan", () => {
+  const source = { width: 400, height: 200 };
+  const canvasSize = { width: 600, height: 400 };
+
+  it("keeps at least half of the image within the viewport", () => {
+    expect(clampCanvasPan({ x: -500, y: -500 }, source, 1, canvasSize)).toEqual({
+      x: -200,
+      y: -100,
+    });
+    expect(clampCanvasPan({ x: 900, y: 900 }, source, 1, canvasSize)).toEqual({
+      x: 400,
+      y: 300,
+    });
   });
 
-  it("keeps detailed outlines for selected small irregular items", () => {
-    expect(
-      shouldDrawDetailedMaskBoundary(
-        {
-          boundingBox: { x: 0, y: 0, width: 180, height: 160 },
-          pixelCount: 18_000,
-        },
-        true,
-        70,
-      ),
-    ).toBe(true);
+  it("uses scaled image dimensions for the bounds", () => {
+    expect(clampCanvasPan({ x: -500, y: 900 }, source, 2, canvasSize)).toEqual({
+      x: -400,
+      y: 200,
+    });
   });
 });

@@ -1,12 +1,13 @@
 import { Maximize2, MousePointer2, ZoomIn, ZoomOut } from "lucide-react";
 import { useEffect, useMemo, useRef, useState } from "react";
 import type { UIStrings } from "../i18n";
-import type { LoadedImage, SliceItem, ToolMode } from "../types";
+import type { AppMode, BoundingBox, LoadedImage, SliceItem, ToolMode } from "../types";
 import { applyBrushEdit, applyLineEdit } from "../lib/imageSegmentation";
 import { createCheckerPattern, hitTestBox } from "../utils/canvas";
 
 interface CanvasWorkspaceProps {
   t: UIStrings;
+  mode: AppMode;
   source: LoadedImage | null;
   items: SliceItem[];
   selectedIds: number[];
@@ -22,6 +23,7 @@ interface CanvasWorkspaceProps {
   onMaskCommit: (edits: Int8Array) => void;
   onRectPanel: (box: { x: number; y: number; width: number; height: number }) => void;
   onPolygonPanel: (points: Array<{ x: number; y: number }>) => void;
+  onRangeExtract: (box: BoundingBox) => void;
 }
 
 type DragState =
@@ -29,10 +31,12 @@ type DragState =
   | { type: "pan"; start: { x: number; y: number }; pan: { x: number; y: number } }
   | { type: "brush"; edits: Int8Array; last: { x: number; y: number }; value: -1 | 0 | 1 }
   | { type: "line"; from: { x: number; y: number }; to: { x: number; y: number } }
-  | { type: "rect"; from: { x: number; y: number }; to: { x: number; y: number } };
+  | { type: "rect"; from: { x: number; y: number }; to: { x: number; y: number } }
+  | { type: "rangeExtract"; from: { x: number; y: number }; to: { x: number; y: number } };
 
 export function CanvasWorkspace({
   t,
+  mode,
   source,
   items,
   selectedIds,
@@ -48,6 +52,7 @@ export function CanvasWorkspace({
   onMaskCommit,
   onRectPanel,
   onPolygonPanel,
+  onRangeExtract,
 }: CanvasWorkspaceProps) {
   const canvasRef = useRef<HTMLCanvasElement | null>(null);
   const shellRef = useRef<HTMLDivElement | null>(null);
@@ -103,9 +108,40 @@ export function CanvasWorkspace({
     drawBoxes(ctx, items, selectedSet);
     if (drag?.type === "line") drawLineGuide(ctx, drag.from, drag.to);
     if (drag?.type === "rect") drawRectGuide(ctx, drag.from, drag.to);
+    if (drag?.type === "rangeExtract") drawRangeExtractGuide(ctx, drag.from, drag.to);
     if (polygon.length > 0) drawPolygonGuide(ctx, polygon);
     ctx.restore();
   }, [canvasSize, source, items, selectedSet, edits, drag, polygon, zoom, pan, t]);
+
+  useEffect(() => {
+    if (!source) return;
+    const clampedPan = clampCanvasPan(pan, source, zoom, canvasSize);
+    if (clampedPan.x !== pan.x || clampedPan.y !== pan.y) onPanChange(clampedPan);
+  }, [canvasSize, onPanChange, pan, source, zoom]);
+
+  useEffect(() => {
+    const canvas = canvasRef.current;
+    if (!canvas) return;
+    const handleWheel = (event: WheelEvent) => {
+      event.preventDefault();
+      if (!source) return;
+
+      const rect = canvas.getBoundingClientRect();
+      const pointerX = event.clientX - rect.left;
+      const pointerY = event.clientY - rect.top;
+      const nextZoom = Math.max(0.05, Math.min(4, zoom * (event.deltaY > 0 ? 0.9 : 1.1)));
+      const imageX = (pointerX - pan.x) / zoom;
+      const imageY = (pointerY - pan.y) / zoom;
+
+      onZoomChange(nextZoom);
+      onPanChange(clampCanvasPan({
+        x: pointerX - imageX * nextZoom,
+        y: pointerY - imageY * nextZoom,
+      }, source, nextZoom, canvasSize));
+    };
+    canvas.addEventListener("wheel", handleWheel, { passive: false });
+    return () => canvas.removeEventListener("wheel", handleWheel);
+  }, [canvasSize, onPanChange, onZoomChange, pan, source, zoom]);
 
   useEffect(() => {
     if (tool !== "polygon") setPolygon([]);
@@ -120,28 +156,10 @@ export function CanvasWorkspace({
     };
   }
 
-  function handleWheel(event: {
-    preventDefault: () => void;
-    currentTarget: HTMLCanvasElement;
-    clientX: number;
-    clientY: number;
-    deltaY: number;
-  }) {
-    event.preventDefault();
-    if (!source) return;
-
-    const rect = event.currentTarget.getBoundingClientRect();
-    const pointerX = event.clientX - rect.left;
-    const pointerY = event.clientY - rect.top;
-    const nextZoom = Math.max(0.05, Math.min(4, zoom * (event.deltaY > 0 ? 0.9 : 1.1)));
-    const imageX = (pointerX - pan.x) / zoom;
-    const imageY = (pointerY - pan.y) / zoom;
-
-    onZoomChange(nextZoom);
-    onPanChange({
-      x: pointerX - imageX * nextZoom,
-      y: pointerY - imageY * nextZoom,
-    });
+  function setZoomAndClamp(nextZoom: number) {
+    const boundedZoom = Math.max(0.05, Math.min(4, nextZoom));
+    onZoomChange(boundedZoom);
+    if (source) onPanChange(clampCanvasPan(pan, source, boundedZoom, canvasSize));
   }
 
   function handlePointerDown(event: React.PointerEvent<HTMLCanvasElement>) {
@@ -184,6 +202,11 @@ export function CanvasWorkspace({
       return;
     }
 
+    if (tool === "rangeExtract" && mode === "transparent") {
+      setDrag({ type: "rangeExtract", from: imagePoint, to: imagePoint });
+      return;
+    }
+
     if (tool === "polygon") {
       const next = [...polygon, clampPoint(imagePoint, source.width, source.height)];
       setPolygon(next);
@@ -194,10 +217,10 @@ export function CanvasWorkspace({
     if (!source || !drag) return;
     const imagePoint = screenToImage(event.clientX, event.clientY);
     if (drag.type === "pan") {
-      onPanChange({
+      onPanChange(clampCanvasPan({
         x: drag.pan.x + event.clientX - drag.start.x,
         y: drag.pan.y + event.clientY - drag.start.y,
-      });
+      }, source, zoom, canvasSize));
     } else if (drag.type === "brush") {
       const radius = drag.value === -1 ? 12 : 10;
       applyLineEdit(drag.edits, source.width, source.height, drag.last, imagePoint, radius, drag.value);
@@ -205,7 +228,7 @@ export function CanvasWorkspace({
       setDrag({ ...drag, last: imagePoint });
     } else if (drag.type === "line") {
       setDrag({ ...drag, to: imagePoint });
-    } else if (drag.type === "rect") {
+    } else if (drag.type === "rect" || drag.type === "rangeExtract") {
       setDrag({ ...drag, to: imagePoint });
     }
   }
@@ -225,6 +248,12 @@ export function CanvasWorkspace({
       const width = Math.abs(drag.to.x - drag.from.x);
       const height = Math.abs(drag.to.y - drag.from.y);
       if (width > 4 && height > 4) onRectPanel({ x, y, width, height });
+    } else if (drag.type === "rangeExtract") {
+      const x = Math.min(drag.from.x, drag.to.x);
+      const y = Math.min(drag.from.y, drag.to.y);
+      const width = Math.abs(drag.to.x - drag.from.x);
+      const height = Math.abs(drag.to.y - drag.from.y);
+      if (width > 4 && height > 4) onRangeExtract({ x, y, width, height });
     }
     setDrag(null);
   }
@@ -244,10 +273,10 @@ export function CanvasWorkspace({
       1,
     );
     onZoomChange(Math.max(0.05, scale));
-    onPanChange({
+    onPanChange(clampCanvasPan({
       x: (canvasSize.width - source.width * scale) / 2,
       y: (canvasSize.height - source.height * scale) / 2,
-    });
+    }, source, scale, canvasSize));
   }
 
   return (
@@ -261,7 +290,7 @@ export function CanvasWorkspace({
           <button className="icon-button active" title={t.canvas.currentTool}>
             <MousePointer2 size={16} />
           </button>
-          <button className="icon-button" title={t.canvas.zoomOut} onClick={() => onZoomChange(Math.max(0.05, zoom - 0.1))}>
+          <button className="icon-button" title={t.canvas.zoomOut} onClick={() => setZoomAndClamp(zoom - 0.1)}>
             <ZoomOut size={16} />
           </button>
           <input
@@ -270,10 +299,10 @@ export function CanvasWorkspace({
             max="4"
             step="0.05"
             value={zoom}
-            onChange={(event) => onZoomChange(Number(event.target.value))}
+            onChange={(event) => setZoomAndClamp(Number(event.target.value))}
           />
           <strong>{Math.round(zoom * 100)}%</strong>
-          <button className="icon-button" title={t.canvas.zoomIn} onClick={() => onZoomChange(Math.min(4, zoom + 0.1))}>
+          <button className="icon-button" title={t.canvas.zoomIn} onClick={() => setZoomAndClamp(zoom + 0.1)}>
             <ZoomIn size={16} />
           </button>
           <button className="icon-button" title={t.canvas.fitCanvas} onClick={fitToView}>
@@ -284,7 +313,6 @@ export function CanvasWorkspace({
       <div ref={shellRef} className="canvas-shell">
         <canvas
           ref={canvasRef}
-          onWheel={handleWheel}
           onPointerDown={handlePointerDown}
           onPointerMove={handlePointerMove}
           onPointerUp={handlePointerUp}
@@ -298,6 +326,20 @@ export function CanvasWorkspace({
       </div>
     </main>
   );
+}
+
+export function clampCanvasPan(
+  pan: { x: number; y: number },
+  source: Pick<LoadedImage, "width" | "height">,
+  zoom: number,
+  canvasSize: { width: number; height: number },
+) {
+  const imageWidth = source.width * zoom;
+  const imageHeight = source.height * zoom;
+  return {
+    x: Math.max(-imageWidth / 2, Math.min(canvasSize.width - imageWidth / 2, pan.x)),
+    y: Math.max(-imageHeight / 2, Math.min(canvasSize.height - imageHeight / 2, pan.y)),
+  };
 }
 
 function drawEmpty(ctx: CanvasRenderingContext2D, width: number, height: number, message: string) {
@@ -451,6 +493,25 @@ function drawRectGuide(
   const height = Math.abs(to.y - from.y);
   ctx.fillRect(x, y, width, height);
   ctx.strokeRect(x, y, width, height);
+}
+
+function drawRangeExtractGuide(
+  ctx: CanvasRenderingContext2D,
+  from: { x: number; y: number },
+  to: { x: number; y: number },
+) {
+  const x = Math.min(from.x, to.x);
+  const y = Math.min(from.y, to.y);
+  const width = Math.abs(to.x - from.x);
+  const height = Math.abs(to.y - from.y);
+  ctx.save();
+  ctx.strokeStyle = "#f97316";
+  ctx.fillStyle = "rgba(249, 115, 22, 0.12)";
+  ctx.lineWidth = 2;
+  ctx.setLineDash([8, 5]);
+  ctx.fillRect(x, y, width, height);
+  ctx.strokeRect(x, y, width, height);
+  ctx.restore();
 }
 
 function drawPolygonGuide(ctx: CanvasRenderingContext2D, points: Array<{ x: number; y: number }>) {

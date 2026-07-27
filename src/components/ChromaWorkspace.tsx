@@ -13,6 +13,7 @@ import {
 } from "lucide-react";
 import { useEffect, useRef, useState } from "react";
 import type { UIStrings } from "../i18n";
+import { sanitizePngFileName } from "../lib/exportAssets";
 import {
   buildChromaKeyPreviewResult,
   canvasToImagePoint,
@@ -90,6 +91,7 @@ export function ChromaWorkspace({
   const [previewInput, setPreviewInput] = useState<ChromaPreviewInput | null>(null);
   const [resultBackground, setResultBackground] =
     useState<ResultBackground>("transparent");
+  const [exportFileName, setExportFileName] = useState("");
   const uploadDragDepthRef = useRef(0);
   const [uploadDragActive, setUploadDragActive] = useState(false);
   const effectiveParams = params.livePreview ? params : appliedParams;
@@ -99,9 +101,12 @@ export function ChromaWorkspace({
     if (!source) {
       setResult(null);
       setPreviewInput(null);
+      setExportFileName("");
       return;
     }
     setPreviewInput(createChromaKeyPreviewInput(source.imageData));
+    const base = source.fileName.replace(/\.[^.]+$/, "") || "image";
+    setExportFileName(`${base}-transparent`);
   }, [source]);
 
   useEffect(() => {
@@ -187,7 +192,7 @@ export function ChromaWorkspace({
         processed.resultData,
       );
       const url = URL.createObjectURL(blob);
-      downloadUrl(url, `${base}-transparent.png`);
+      downloadUrl(url, sanitizePngFileName(exportFileName, `${base}-transparent.png`));
       window.setTimeout(() => URL.revokeObjectURL(url), 1000);
     } finally {
       setProcessing(false);
@@ -480,6 +485,15 @@ export function ChromaWorkspace({
                 <Download size={16} />
                 {t.chroma.exportPng}
               </button>
+              <label className="select-label chroma-export-name">
+                {t.right.exportFileName}
+                <input
+                  className="file-name-input"
+                  value={exportFileName}
+                  placeholder={t.right.fileNamePlaceholder}
+                  onChange={(event) => setExportFileName(event.target.value)}
+                />
+              </label>
             </>
           ) : (
             <div className="empty-state">{t.chroma.emptyResult}</div>

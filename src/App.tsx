@@ -11,9 +11,11 @@ import { defaultChromaKeyParams } from "./lib/chromaKey";
 import { exportMetadata, exportSingle, exportZip, itemFileName } from "./lib/exportAssets";
 import {
   createComicContentMask,
+  findItemsIntersectingBox,
   makePolygonPanel,
   makeRectPanel,
   mergeItems,
+  replaceItemsWithMerge,
 } from "./lib/imageSegmentation";
 import { registerVisit, type VisitCounterState } from "./lib/visitCounter";
 import {
@@ -33,6 +35,7 @@ import {
 import type { Language, ThemeMode } from "./i18n";
 import type {
   AppMode,
+  BoundingBox,
   ChromaKeyParams,
   ComicDetectionParams,
   LoadedImage,
@@ -264,6 +267,7 @@ function App() {
 
   async function handleModeChange(nextMode: AppMode) {
     setMode(nextMode);
+    if (nextMode !== "transparent" && tool === "rangeExtract") setTool("select");
     if (nextMode === "chroma") return;
     if (!state.source) return;
     if (nextMode === "comic") {
@@ -385,10 +389,7 @@ function App() {
       Math.min(...selectedItems.map((item) => item.order)),
     );
     if (!merged) return;
-    const selectedSet = new Set(state.selectedIds);
-    const next = [...state.items.filter((item) => !selectedSet.has(item.id)), merged]
-      .sort((a, b) => a.order - b.order)
-      .map((item, order) => ({ ...item, order }));
+    const next = replaceItemsWithMerge(state.items, selectedItems, merged);
     dispatch({
       type: "apply",
       history: true,
@@ -396,6 +397,36 @@ function App() {
         items: next,
         selectedIds: [merged.id],
         status: t.status.merged,
+      },
+    });
+  }
+
+  function handleRangeExtract(box: BoundingBox) {
+    if (mode !== "transparent" || !state.source) return;
+    const matchedItems = findItemsIntersectingBox(state.items, box);
+    if (matchedItems.length < 2) {
+      dispatch({
+        type: "apply",
+        patch: { status: t.status.rangeExtractTooFew },
+      });
+      return;
+    }
+
+    const merged = mergeItems(
+      state.source.imageData,
+      matchedItems,
+      nextId(state.items),
+      Math.min(...matchedItems.map((item) => item.order)),
+    );
+    if (!merged) return;
+
+    dispatch({
+      type: "apply",
+      history: true,
+      patch: {
+        items: replaceItemsWithMerge(state.items, matchedItems, merged),
+        selectedIds: [merged.id],
+        status: t.status.rangeExtracted(matchedItems.length),
       },
     });
   }
@@ -583,6 +614,7 @@ function App() {
           />
           <CanvasWorkspace
             t={t}
+            mode={mode}
             source={state.source}
             items={state.items}
             selectedIds={state.selectedIds}
@@ -598,6 +630,7 @@ function App() {
             onMaskCommit={handleMaskCommit}
             onRectPanel={handleRectPanel}
             onPolygonPanel={handlePolygonPanel}
+            onRangeExtract={handleRangeExtract}
           />
           <RightPanel
             t={t}
