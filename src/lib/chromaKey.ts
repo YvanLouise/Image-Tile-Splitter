@@ -93,13 +93,23 @@ export function processChromaKey(
   }
 
   const canContractOuterEdge = !normalizedParams.invert && edgeContract > 0;
-  const outerBackground = normalizedParams.outerOnly || canContractOuterEdge
+  const canRefineOuterEdge = !normalizedParams.invert && despillStrength > 0;
+  const outerBackground = normalizedParams.outerOnly || canContractOuterEdge || canRefineOuterEdge
     ? traceOuterRemovablePixels(
         normalizedParams.invert ? removableByPixel : backgroundCoreByPixel,
         imageData.width,
         imageData.height,
         normalizedParams.outerMode,
         normalizedParams.samplePoint,
+      )
+    : null;
+  const outerEdgeDistances = outerBackground && (canContractOuterEdge || canRefineOuterEdge)
+    ? traceOuterEdgeDistances(
+        outerBackground,
+        excludedByPixel,
+        imageData.width,
+        imageData.height,
+        Math.max(edgeContract, 3),
       )
     : null;
   const outerMask = normalizedParams.outerOnly && outerBackground
@@ -110,13 +120,10 @@ export function processChromaKey(
         imageData.height,
       )
     : null;
-  const edgeContractResult = outerBackground && canContractOuterEdge
+  const edgeContractResult = outerEdgeDistances && canContractOuterEdge
     ? contractOuterEdge(
         alphaByPixel,
-        outerBackground,
-        excludedByPixel,
-        imageData.width,
-        imageData.height,
+        outerEdgeDistances,
         edgeContract,
       )
     : null;
@@ -135,9 +142,29 @@ export function processChromaKey(
       : sourceAlphaByte;
     const alpha = outputAlpha / 255;
 
-    const edgeAmount = (1 - alpha) * despillStrength;
-    if (shouldApplyKey && edgeAmount > 0 && !normalizedParams.invert) {
-      const corrected = despillRgb(r, g, b, keyUnit, edgeAmount);
+    const edgeDistance = outerEdgeDistances?.[pixel] ?? -1;
+    const outerEdgeWeight = edgeDistance > 0 && edgeDistance <= 2
+      ? (3 - edgeDistance) / 2
+      : 0;
+    const edgeAmount = Math.max(1 - alpha, outerEdgeWeight * 0.55) * despillStrength;
+    if ((shouldApplyKey || outerEdgeWeight > 0) && edgeAmount > 0 && !normalizedParams.invert) {
+      let corrected = despillRgb(r, g, b, keyUnit, edgeAmount);
+      const interiorColor = outerEdgeDistances
+        ? sampleInteriorEdgeColor(
+            imageData.data,
+            outerEdgeDistances,
+            pixel,
+            imageData.width,
+            imageData.height,
+          )
+        : null;
+      if (interiorColor && outerEdgeWeight > 0) {
+        corrected = blendRgb(
+          corrected,
+          interiorColor,
+          outerEdgeWeight * despillStrength * 0.35,
+        );
+      }
       resultData[offset] = corrected[0];
       resultData[offset + 1] = corrected[1];
       resultData[offset + 2] = corrected[2];
@@ -347,19 +374,16 @@ function expandOuterMask(
   return expanded;
 }
 
-function contractOuterEdge(
-  alphaByPixel: Uint8ClampedArray,
+function traceOuterEdgeDistances(
   outerBackground: Uint8Array,
   excludedByPixel: Uint8Array,
   width: number,
   height: number,
-  radius: number,
+  maxDistance: number,
 ) {
-  const contractedAlphaByPixel = new Uint8ClampedArray(alphaByPixel);
-  const affectedByPixel = new Uint8Array(alphaByPixel.length);
-  const distances = new Int16Array(alphaByPixel.length);
+  const distances = new Int16Array(outerBackground.length);
   distances.fill(-1);
-  const queue = new Int32Array(alphaByPixel.length);
+  const queue = new Int32Array(outerBackground.length);
   let queueStart = 0;
   let queueEnd = 0;
 
@@ -374,7 +398,7 @@ function contractOuterEdge(
     const index = queue[queueStart];
     queueStart += 1;
     const distance = distances[index];
-    if (distance >= radius) continue;
+    if (distance >= maxDistance) continue;
     const x = index % width;
     const y = Math.floor(index / width);
     for (let dy = -1; dy <= 1; dy += 1) {
@@ -389,17 +413,68 @@ function contractOuterEdge(
         distances[next] = nextDistance;
         queue[queueEnd] = next;
         queueEnd += 1;
-        const factor = Math.max(0, Math.min(1, (nextDistance - 0.5) / radius));
-        const nextAlpha = Math.round(alphaByPixel[next] * factor);
-        if (nextAlpha < alphaByPixel[next]) {
-          contractedAlphaByPixel[next] = nextAlpha;
-          affectedByPixel[next] = 1;
-        }
       }
     }
   }
 
+  return distances;
+}
+
+function contractOuterEdge(
+  alphaByPixel: Uint8ClampedArray,
+  distances: Int16Array,
+  radius: number,
+) {
+  const contractedAlphaByPixel = new Uint8ClampedArray(alphaByPixel);
+  const affectedByPixel = new Uint8Array(alphaByPixel.length);
+  for (let index = 0; index < distances.length; index += 1) {
+    const distance = distances[index];
+    if (distance <= 0 || distance > radius) continue;
+    const factor = Math.max(0, Math.min(1, (distance - 0.5) / radius));
+    const nextAlpha = Math.round(alphaByPixel[index] * factor);
+    if (nextAlpha < alphaByPixel[index]) {
+      contractedAlphaByPixel[index] = nextAlpha;
+      affectedByPixel[index] = 1;
+    }
+  }
+
   return { alphaByPixel: contractedAlphaByPixel, affectedByPixel };
+}
+
+function sampleInteriorEdgeColor(
+  data: Uint8ClampedArray,
+  distances: Int16Array,
+  index: number,
+  width: number,
+  height: number,
+): [number, number, number] | null {
+  const distance = distances[index];
+  if (distance <= 0) return null;
+  const x = index % width;
+  const y = Math.floor(index / width);
+  let r = 0;
+  let g = 0;
+  let b = 0;
+  let count = 0;
+  for (let dy = -1; dy <= 1; dy += 1) {
+    for (let dx = -1; dx <= 1; dx += 1) {
+      if (dx === 0 && dy === 0) continue;
+      const nextX = x + dx;
+      const nextY = y + dy;
+      if (nextX < 0 || nextX >= width || nextY < 0 || nextY >= height) continue;
+      const next = nextY * width + nextX;
+      if (distances[next] <= distance) continue;
+      const offset = next * 4;
+      if (data[offset + 3] < 192) continue;
+      r += data[offset];
+      g += data[offset + 1];
+      b += data[offset + 2];
+      count += 1;
+    }
+  }
+  return count > 0
+    ? [Math.round(r / count), Math.round(g / count), Math.round(b / count)]
+    : null;
 }
 
 export function getChromaPreviewDimensions(
@@ -680,6 +755,19 @@ function despillRgb(
     clampByte(r - keyUnit[0] * excess * amount),
     clampByte(g - keyUnit[1] * excess * amount),
     clampByte(b - keyUnit[2] * excess * amount),
+  ];
+}
+
+function blendRgb(
+  from: [number, number, number],
+  to: [number, number, number],
+  amount: number,
+): [number, number, number] {
+  const weight = clamp01(amount);
+  return [
+    clampByte(from[0] + (to[0] - from[0]) * weight),
+    clampByte(from[1] + (to[1] - from[1]) * weight),
+    clampByte(from[2] + (to[2] - from[2]) * weight),
   ];
 }
 

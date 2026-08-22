@@ -1,4 +1,3 @@
-import JSZip from "jszip";
 import type { LoadedImage, SliceItem } from "../types";
 import { downloadUrl } from "../utils/canvas";
 import { renderSliceItemUrl } from "./imageSegmentation";
@@ -74,6 +73,7 @@ export async function exportZip(
   items: SliceItem[],
   includeMetadata: boolean,
 ) {
+  const { default: JSZip } = await import("jszip");
   const zip = new JSZip();
   for (const item of items.slice().sort((a, b) => a.order - b.order)) {
     const base64 = renderSliceItemUrl(source.imageData, item).split(",")[1];

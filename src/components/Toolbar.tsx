@@ -6,6 +6,7 @@ import {
   HelpCircle,
   ImageUp,
   Languages,
+  MoreHorizontal,
   Moon,
   Paintbrush,
   PenLine,
@@ -19,7 +20,7 @@ import {
   ScanSearch,
   Waypoints,
 } from "lucide-react";
-import { useState, type ComponentType } from "react";
+import { useEffect, useState, type ComponentType } from "react";
 import appIconUrl from "../../icon/YL图块分离工具icon.png";
 import bilibiliIconUrl from "../../icon/作者B站icon.png";
 import githubIconUrl from "../../icon/YLGitHubIco.png";
@@ -35,6 +36,7 @@ interface ToolbarProps {
   layout: WorkspaceLayout;
   canUndo: boolean;
   canRedo: boolean;
+  isMobile: boolean;
   onModeChange: (mode: AppMode) => void;
   onToolChange: (tool: ToolMode) => void;
   onLanguageChange: (language: Language) => void;
@@ -66,6 +68,7 @@ export function Toolbar({
   layout,
   canUndo,
   canRedo,
+  isMobile,
   onModeChange,
   onToolChange,
   onLanguageChange,
@@ -77,6 +80,20 @@ export function Toolbar({
   onRedo,
 }: ToolbarProps) {
   const [settingsOpen, setSettingsOpen] = useState(false);
+  const [mobileMenuOpen, setMobileMenuOpen] = useState(false);
+
+  useEffect(() => {
+    if (!isMobile) setMobileMenuOpen(false);
+  }, [isMobile]);
+
+  useEffect(() => {
+    if (!mobileMenuOpen) return;
+    const closeOnEscape = (event: KeyboardEvent) => {
+      if (event.key === "Escape") setMobileMenuOpen(false);
+    };
+    window.addEventListener("keydown", closeOnEscape);
+    return () => window.removeEventListener("keydown", closeOnEscape);
+  }, [mobileMenuOpen]);
 
   return (
     <header className="app-header">
@@ -155,7 +172,7 @@ export function Toolbar({
         )}
       </div>
 
-      <div className="header-actions">
+      <div className="header-actions desktop-header-actions">
         <button className="icon-text" onClick={onUploadClick}>
           <ImageUp size={17} />
           {t.common.upload}
@@ -242,6 +259,135 @@ export function Toolbar({
         <button className="icon-button" title={t.toolbar.export}>
           <Download size={17} />
         </button>
+      </div>
+      <div className="header-actions mobile-header-actions">
+        <button
+          className="icon-button"
+          title={t.common.upload}
+          aria-label={t.common.upload}
+          onClick={onUploadClick}
+        >
+          <ImageUp size={18} />
+        </button>
+        <button
+          className="icon-button mobile-history-action"
+          title={t.toolbar.undo}
+          aria-label={t.toolbar.undo}
+          disabled={mode === "chroma" || !canUndo}
+          onClick={onUndo}
+        >
+          <Undo2 size={18} />
+        </button>
+        <button
+          className="icon-button mobile-history-action"
+          title={t.toolbar.redo}
+          aria-label={t.toolbar.redo}
+          disabled={mode === "chroma" || !canRedo}
+          onClick={onRedo}
+        >
+          <Redo2 size={18} />
+        </button>
+        <button
+          className={mobileMenuOpen ? "icon-button active" : "icon-button"}
+          title={t.mobile.more}
+          aria-label={t.mobile.more}
+          aria-expanded={mobileMenuOpen}
+          aria-controls="mobile-utility-menu"
+          onClick={() => setMobileMenuOpen((open) => !open)}
+        >
+          <MoreHorizontal size={20} />
+        </button>
+        {mobileMenuOpen ? (
+          <>
+            <button
+              className="mobile-menu-backdrop"
+              type="button"
+              aria-label={t.common.close}
+              onClick={() => setMobileMenuOpen(false)}
+            />
+            <section id="mobile-utility-menu" className="mobile-utility-menu" aria-label={t.mobile.more}>
+              <div className="mobile-menu-history">
+                <button
+                  className="mobile-menu-command"
+                  type="button"
+                  disabled={mode === "chroma" || !canUndo}
+                  onClick={() => {
+                    setMobileMenuOpen(false);
+                    onUndo();
+                  }}
+                >
+                  <Undo2 size={18} />
+                  {t.toolbar.undo}
+                </button>
+                <button
+                  className="mobile-menu-command"
+                  type="button"
+                  disabled={mode === "chroma" || !canRedo}
+                  onClick={() => {
+                    setMobileMenuOpen(false);
+                    onRedo();
+                  }}
+                >
+                  <Redo2 size={18} />
+                  {t.toolbar.redo}
+                </button>
+              </div>
+              <button
+                className="mobile-menu-command"
+                type="button"
+                onClick={() => {
+                  setMobileMenuOpen(false);
+                  onHelpClick();
+                }}
+              >
+                <HelpCircle size={18} />
+                {t.common.help}
+              </button>
+              <div className="appearance-group">
+                <span>{t.toolbar.themeLabel}</span>
+                <div className="segmented appearance-segmented">
+                  <button
+                    className={theme === "light" ? "active" : ""}
+                    aria-pressed={theme === "light"}
+                    onClick={() => theme === "dark" && onThemeToggle()}
+                  >
+                    <Sun size={15} />
+                    {t.common.lightTheme}
+                  </button>
+                  <button
+                    className={theme === "dark" ? "active" : ""}
+                    aria-pressed={theme === "dark"}
+                    onClick={() => theme === "light" && onThemeToggle()}
+                  >
+                    <Moon size={15} />
+                    {t.common.darkTheme}
+                  </button>
+                </div>
+              </div>
+              <label className="mobile-language-control">
+                <span>{t.common.language}</span>
+                <select
+                  aria-label={t.common.language}
+                  value={language}
+                  onChange={(event) => onLanguageChange(event.target.value as Language)}
+                >
+                  <option value="zh">简体中文</option>
+                  <option value="en">English</option>
+                </select>
+              </label>
+              <nav className="mobile-author-links" aria-label="作者链接">
+                <a href="https://space.bilibili.com/190749586" target="_blank" rel="noopener noreferrer">
+                  <img src={bilibiliIconUrl} alt="" />
+                  <span>作者B站</span>
+                </a>
+                <a href="https://github.com/YvanLouise/Image-Tile-Splitter" target="_blank" rel="noopener noreferrer">
+                  <img src={githubIconUrl} alt="" />
+                  <span>GitHub</span>
+                </a>
+              </nav>
+            </section>
+          </>
+        ) : null}
       </div>
     </header>
   );

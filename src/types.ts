@@ -1,5 +1,6 @@
 export type AppMode = "transparent" | "comic" | "chroma";
 export type WorkspaceLayout = "classic" | "focus";
+export type MobileWorkspaceTab = "settings" | "canvas" | "result";
 export type NeighborMode = 4 | 8;
 export type ToolMode =
   | "pan"

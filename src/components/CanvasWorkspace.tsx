@@ -1,9 +1,14 @@
-import { Maximize2, MousePointer2, ZoomIn, ZoomOut } from "lucide-react";
+import { Check, Maximize2, MousePointer2, X, ZoomIn, ZoomOut } from "lucide-react";
 import { useEffect, useMemo, useRef, useState } from "react";
 import type { UIStrings } from "../i18n";
 import type { AppMode, BoundingBox, LoadedImage, SliceItem, ToolMode } from "../types";
 import { applyBrushEdit, applyLineEdit } from "../lib/imageSegmentation";
-import { createCheckerPattern, hitTestBox } from "../utils/canvas";
+import {
+  createCheckerPattern,
+  getPinchTransform,
+  hitTestBox,
+  type CanvasPoint,
+} from "../utils/canvas";
 
 interface CanvasWorkspaceProps {
   t: UIStrings;
@@ -24,6 +29,7 @@ interface CanvasWorkspaceProps {
   onRectPanel: (box: { x: number; y: number; width: number; height: number }) => void;
   onPolygonPanel: (points: Array<{ x: number; y: number }>) => void;
   onRangeExtract: (box: BoundingBox) => void;
+  isVisible: boolean;
 }
 
 type DragState =
@@ -53,39 +59,74 @@ export function CanvasWorkspace({
   onRectPanel,
   onPolygonPanel,
   onRangeExtract,
+  isVisible,
 }: CanvasWorkspaceProps) {
   const canvasRef = useRef<HTMLCanvasElement | null>(null);
   const shellRef = useRef<HTMLDivElement | null>(null);
   const [canvasSize, setCanvasSize] = useState({ width: 900, height: 620 });
   const [drag, setDrag] = useState<DragState>(null);
   const [polygon, setPolygon] = useState<Array<{ x: number; y: number }>>([]);
+  const dragRef = useRef<DragState>(null);
+  const activePointerIdRef = useRef<number | null>(null);
+  const touchPointersRef = useRef(new Map<number, CanvasPoint>());
+  const pendingTouchRef = useRef<null | {
+    pointerId: number;
+    clientX: number;
+    clientY: number;
+  }>(null);
+  const pinchRef = useRef<null | {
+    ids: [number, number];
+    startPoints: [CanvasPoint, CanvasPoint];
+    zoom: number;
+    pan: CanvasPoint;
+  }>(null);
 
   const selectedSet = useMemo(() => new Set(selectedIds), [selectedIds]);
+  const editsOverlay = useMemo(
+    () => createMaskEditsOverlay(edits, source?.width ?? 0, source?.height ?? 0),
+    [edits, source?.height, source?.width],
+  );
 
   useEffect(() => {
     const shell = shellRef.current;
     if (!shell) return;
+    const measure = () => {
+      const rect = shell.getBoundingClientRect();
+      if (rect.width <= 0 || rect.height <= 0) return;
+      setCanvasSize({
+        width: Math.max(1, Math.floor(rect.width)),
+        height: Math.max(240, Math.floor(rect.height)),
+      });
+    };
     const observer = new ResizeObserver(([entry]) => {
+      if (entry.contentRect.width <= 0 || entry.contentRect.height <= 0) return;
       const rect = entry.contentRect;
       setCanvasSize({
-        width: Math.max(360, Math.floor(rect.width)),
-        height: Math.max(320, Math.floor(rect.height)),
+        width: Math.max(1, Math.floor(rect.width)),
+        height: Math.max(240, Math.floor(rect.height)),
       });
     });
     observer.observe(shell);
-    return () => observer.disconnect();
-  }, []);
+    const frame = isVisible ? window.requestAnimationFrame(measure) : 0;
+    return () => {
+      observer.disconnect();
+      if (frame) window.cancelAnimationFrame(frame);
+    };
+  }, [isVisible]);
 
   useEffect(() => {
     const canvas = canvasRef.current;
     if (!canvas) return;
-    canvas.width = canvasSize.width * window.devicePixelRatio;
-    canvas.height = canvasSize.height * window.devicePixelRatio;
+    const ratio = Math.min(window.devicePixelRatio || 1, 2);
+    const backingWidth = Math.max(1, Math.round(canvasSize.width * ratio));
+    const backingHeight = Math.max(1, Math.round(canvasSize.height * ratio));
+    if (canvas.width !== backingWidth) canvas.width = backingWidth;
+    if (canvas.height !== backingHeight) canvas.height = backingHeight;
     canvas.style.width = `${canvasSize.width}px`;
     canvas.style.height = `${canvasSize.height}px`;
     const ctx = canvas.getContext("2d");
     if (!ctx) return;
-    ctx.setTransform(window.devicePixelRatio, 0, 0, window.devicePixelRatio, 0, 0);
+    ctx.setTransform(ratio, 0, 0, ratio, 0, 0);
     ctx.clearRect(0, 0, canvasSize.width, canvasSize.height);
     ctx.fillStyle = "#f8fafc";
     ctx.fillRect(0, 0, canvasSize.width, canvasSize.height);
@@ -104,14 +145,14 @@ export function CanvasWorkspace({
       ctx.fillRect(0, 0, source.width, source.height);
     }
     ctx.drawImage(source.bitmap, 0, 0);
-    drawMaskEdits(ctx, edits, source.width, source.height);
+    if (editsOverlay) ctx.drawImage(editsOverlay, 0, 0);
     drawBoxes(ctx, items, selectedSet);
     if (drag?.type === "line") drawLineGuide(ctx, drag.from, drag.to);
     if (drag?.type === "rect") drawRectGuide(ctx, drag.from, drag.to);
     if (drag?.type === "rangeExtract") drawRangeExtractGuide(ctx, drag.from, drag.to);
     if (polygon.length > 0) drawPolygonGuide(ctx, polygon);
     ctx.restore();
-  }, [canvasSize, source, items, selectedSet, edits, drag, polygon, zoom, pan, t]);
+  }, [canvasSize, source, items, selectedSet, editsOverlay, drag, polygon, zoom, pan, t]);
 
   useEffect(() => {
     if (!source) return;
@@ -162,14 +203,24 @@ export function CanvasWorkspace({
     if (source) onPanChange(clampCanvasPan(pan, source, boundedZoom, canvasSize));
   }
 
-  function handlePointerDown(event: React.PointerEvent<HTMLCanvasElement>) {
+  function setActiveDrag(next: DragState) {
+    dragRef.current = next;
+    setDrag(next);
+  }
+
+  function startPointerInteraction(
+    pointerId: number,
+    clientX: number,
+    clientY: number,
+    additive = false,
+  ) {
     if (!source) return;
-    event.currentTarget.setPointerCapture(event.pointerId);
-    const imagePoint = screenToImage(event.clientX, event.clientY);
-    const screenPoint = { x: event.clientX, y: event.clientY };
+    activePointerIdRef.current = pointerId;
+    const imagePoint = screenToImage(clientX, clientY);
+    const screenPoint = { x: clientX, y: clientY };
 
     if (tool === "pan") {
-      setDrag({ type: "pan", start: screenPoint, pan });
+      setActiveDrag({ type: "pan", start: screenPoint, pan });
       return;
     }
 
@@ -177,7 +228,8 @@ export function CanvasWorkspace({
       const hit = [...items]
         .reverse()
         .find((item) => hitTestBox(item.boundingBox, imagePoint.x, imagePoint.y));
-      if (hit) onSelect(hit.id, event.ctrlKey || event.metaKey);
+      if (hit) onSelect(hit.id, additive);
+      activePointerIdRef.current = null;
       return;
     }
 
@@ -188,80 +240,198 @@ export function CanvasWorkspace({
       const value = tool === "eraser" ? -1 : 0;
       applyBrushEdit(next, source.width, source.height, imagePoint, tool === "eraser" ? 12 : 10, value);
       onMaskDraft(next);
-      setDrag({ type: "brush", edits: next, last: imagePoint, value });
+      setActiveDrag({ type: "brush", edits: next, last: imagePoint, value });
       return;
     }
 
     if (tool === "splitLine") {
-      setDrag({ type: "line", from: imagePoint, to: imagePoint });
+      setActiveDrag({ type: "line", from: imagePoint, to: imagePoint });
       return;
     }
 
     if (tool === "rect") {
-      setDrag({ type: "rect", from: imagePoint, to: imagePoint });
+      setActiveDrag({ type: "rect", from: imagePoint, to: imagePoint });
       return;
     }
 
     if (tool === "rangeExtract" && mode === "transparent") {
-      setDrag({ type: "rangeExtract", from: imagePoint, to: imagePoint });
+      setActiveDrag({ type: "rangeExtract", from: imagePoint, to: imagePoint });
       return;
     }
 
     if (tool === "polygon") {
       const next = [...polygon, clampPoint(imagePoint, source.width, source.height)];
       setPolygon(next);
+      activePointerIdRef.current = null;
+    }
+  }
+
+  function localPointerPoint(event: React.PointerEvent<HTMLCanvasElement>) {
+    const rect = event.currentTarget.getBoundingClientRect();
+    return { x: event.clientX - rect.left, y: event.clientY - rect.top };
+  }
+
+  function handlePointerDown(event: React.PointerEvent<HTMLCanvasElement>) {
+    if (!source || (event.button !== 0 && event.button !== 1)) return;
+    event.preventDefault();
+    event.currentTarget.setPointerCapture(event.pointerId);
+
+    if (event.pointerType !== "touch") {
+      startPointerInteraction(
+        event.pointerId,
+        event.clientX,
+        event.clientY,
+        event.ctrlKey || event.metaKey,
+      );
+      return;
+    }
+
+    touchPointersRef.current.set(event.pointerId, localPointerPoint(event));
+    if (touchPointersRef.current.size === 1) {
+      pendingTouchRef.current = {
+        pointerId: event.pointerId,
+        clientX: event.clientX,
+        clientY: event.clientY,
+      };
+      return;
+    }
+
+    if (touchPointersRef.current.size === 2 && !dragRef.current) {
+      const entries = [...touchPointersRef.current.entries()] as Array<[number, CanvasPoint]>;
+      pinchRef.current = {
+        ids: [entries[0][0], entries[1][0]],
+        startPoints: [entries[0][1], entries[1][1]],
+        zoom,
+        pan,
+      };
+      pendingTouchRef.current = null;
+      activePointerIdRef.current = null;
     }
   }
 
   function handlePointerMove(event: React.PointerEvent<HTMLCanvasElement>) {
-    if (!source || !drag) return;
+    if (!source) return;
+    if (event.pointerType === "touch") {
+      touchPointersRef.current.set(event.pointerId, localPointerPoint(event));
+      const pinch = pinchRef.current;
+      if (pinch) {
+        const first = touchPointersRef.current.get(pinch.ids[0]);
+        const second = touchPointersRef.current.get(pinch.ids[1]);
+        if (first && second) {
+          const next = getPinchTransform(
+            pinch.startPoints,
+            [first, second],
+            pinch.zoom,
+            pinch.pan,
+          );
+          onZoomChange(next.zoom);
+          onPanChange(clampCanvasPan(next.pan, source, next.zoom, canvasSize));
+        }
+        return;
+      }
+
+      const pending = pendingTouchRef.current;
+      if (pending?.pointerId === event.pointerId) {
+        const moved = Math.hypot(
+          event.clientX - pending.clientX,
+          event.clientY - pending.clientY,
+        );
+        if (moved <= 4) return;
+        pendingTouchRef.current = null;
+        startPointerInteraction(
+          event.pointerId,
+          pending.clientX,
+          pending.clientY,
+        );
+      }
+    }
+
+    if (activePointerIdRef.current !== event.pointerId) return;
+    const activeDrag = dragRef.current;
+    if (!activeDrag) return;
     const imagePoint = screenToImage(event.clientX, event.clientY);
-    if (drag.type === "pan") {
+    if (activeDrag.type === "pan") {
       onPanChange(clampCanvasPan({
-        x: drag.pan.x + event.clientX - drag.start.x,
-        y: drag.pan.y + event.clientY - drag.start.y,
+        x: activeDrag.pan.x + event.clientX - activeDrag.start.x,
+        y: activeDrag.pan.y + event.clientY - activeDrag.start.y,
       }, source, zoom, canvasSize));
-    } else if (drag.type === "brush") {
-      const radius = drag.value === -1 ? 12 : 10;
-      applyLineEdit(drag.edits, source.width, source.height, drag.last, imagePoint, radius, drag.value);
-      onMaskDraft(new Int8Array(drag.edits));
-      setDrag({ ...drag, last: imagePoint });
-    } else if (drag.type === "line") {
-      setDrag({ ...drag, to: imagePoint });
-    } else if (drag.type === "rect" || drag.type === "rangeExtract") {
-      setDrag({ ...drag, to: imagePoint });
+    } else if (activeDrag.type === "brush") {
+      const radius = activeDrag.value === -1 ? 12 : 10;
+      applyLineEdit(activeDrag.edits, source.width, source.height, activeDrag.last, imagePoint, radius, activeDrag.value);
+      onMaskDraft(new Int8Array(activeDrag.edits));
+      setActiveDrag({ ...activeDrag, last: imagePoint });
+    } else if (activeDrag.type === "line") {
+      setActiveDrag({ ...activeDrag, to: imagePoint });
+    } else if (activeDrag.type === "rect" || activeDrag.type === "rangeExtract") {
+      setActiveDrag({ ...activeDrag, to: imagePoint });
     }
   }
 
-  function handlePointerUp() {
-    if (!source || !drag) return;
-    if (drag.type === "brush") {
-      onMaskCommit(new Int8Array(drag.edits));
-    } else if (drag.type === "line" && edits) {
+  function finishPointerInteraction() {
+    const activeDrag = dragRef.current;
+    activePointerIdRef.current = null;
+    if (!source || !activeDrag) return;
+    if (activeDrag.type === "brush") {
+      onMaskCommit(new Int8Array(activeDrag.edits));
+    } else if (activeDrag.type === "line" && edits) {
       onMaskEditStart();
       const next = new Int8Array(edits);
-      applyLineEdit(next, source.width, source.height, drag.from, drag.to, 4, -1);
+      applyLineEdit(next, source.width, source.height, activeDrag.from, activeDrag.to, 4, -1);
       onMaskCommit(next);
-    } else if (drag.type === "rect") {
-      const x = Math.min(drag.from.x, drag.to.x);
-      const y = Math.min(drag.from.y, drag.to.y);
-      const width = Math.abs(drag.to.x - drag.from.x);
-      const height = Math.abs(drag.to.y - drag.from.y);
+    } else if (activeDrag.type === "rect") {
+      const x = Math.min(activeDrag.from.x, activeDrag.to.x);
+      const y = Math.min(activeDrag.from.y, activeDrag.to.y);
+      const width = Math.abs(activeDrag.to.x - activeDrag.from.x);
+      const height = Math.abs(activeDrag.to.y - activeDrag.from.y);
       if (width > 4 && height > 4) onRectPanel({ x, y, width, height });
-    } else if (drag.type === "rangeExtract") {
-      const x = Math.min(drag.from.x, drag.to.x);
-      const y = Math.min(drag.from.y, drag.to.y);
-      const width = Math.abs(drag.to.x - drag.from.x);
-      const height = Math.abs(drag.to.y - drag.from.y);
+    } else if (activeDrag.type === "rangeExtract") {
+      const x = Math.min(activeDrag.from.x, activeDrag.to.x);
+      const y = Math.min(activeDrag.from.y, activeDrag.to.y);
+      const width = Math.abs(activeDrag.to.x - activeDrag.from.x);
+      const height = Math.abs(activeDrag.to.y - activeDrag.from.y);
       if (width > 4 && height > 4) onRangeExtract({ x, y, width, height });
     }
-    setDrag(null);
+    setActiveDrag(null);
+  }
+
+  function handlePointerUp(event: React.PointerEvent<HTMLCanvasElement>) {
+    if (event.pointerType === "touch") {
+      const pinch = pinchRef.current;
+      touchPointersRef.current.delete(event.pointerId);
+      if (pinch?.ids.includes(event.pointerId)) {
+        pinchRef.current = null;
+        pendingTouchRef.current = null;
+        setActiveDrag(null);
+        activePointerIdRef.current = null;
+        return;
+      }
+
+      const pending = pendingTouchRef.current;
+      if (pending?.pointerId === event.pointerId) {
+        pendingTouchRef.current = null;
+        startPointerInteraction(event.pointerId, pending.clientX, pending.clientY);
+        finishPointerInteraction();
+        return;
+      }
+    }
+
+    if (activePointerIdRef.current === event.pointerId) finishPointerInteraction();
   }
 
   function handleDoubleClick() {
     if (tool === "polygon" && polygon.length >= 3) {
       onPolygonPanel(polygon);
       setPolygon([]);
+    }
+  }
+
+  function cancelPointerInteraction(event: React.PointerEvent<HTMLCanvasElement>) {
+    touchPointersRef.current.delete(event.pointerId);
+    if (pinchRef.current?.ids.includes(event.pointerId)) pinchRef.current = null;
+    if (pendingTouchRef.current?.pointerId === event.pointerId) pendingTouchRef.current = null;
+    if (activePointerIdRef.current === event.pointerId) {
+      activePointerIdRef.current = null;
+      setActiveDrag(null);
     }
   }
 
@@ -309,6 +479,23 @@ export function CanvasWorkspace({
             <Maximize2 size={16} />
           </button>
         </div>
+        {tool === "polygon" && polygon.length > 0 ? (
+          <div className="mobile-polygon-actions">
+            <button className="secondary" type="button" onClick={() => setPolygon([])}>
+              <X size={16} />
+              {t.mobile.cancelPolygon}
+            </button>
+            <button
+              className="primary"
+              type="button"
+              disabled={polygon.length < 3}
+              onClick={handleDoubleClick}
+            >
+              <Check size={16} />
+              {t.mobile.finishPolygon}
+            </button>
+          </div>
+        ) : null}
       </div>
       <div ref={shellRef} className="canvas-shell">
         <canvas
@@ -316,7 +503,7 @@ export function CanvasWorkspace({
           onPointerDown={handlePointerDown}
           onPointerMove={handlePointerMove}
           onPointerUp={handlePointerUp}
-          onPointerCancel={() => setDrag(null)}
+          onPointerCancel={cancelPointerInteraction}
           onDoubleClick={handleDoubleClick}
         />
       </div>
@@ -430,39 +617,44 @@ function drawMaskBoundary(ctx: CanvasRenderingContext2D, item: SliceItem) {
   ctx.stroke();
 }
 
-function drawMaskEdits(
-  ctx: CanvasRenderingContext2D,
+function createMaskEditsOverlay(
   edits: Int8Array | null,
   width: number,
   height: number,
 ) {
-  if (!edits) return;
-  const overlay = ctx.createImageData(width, height);
+  if (!edits || width <= 0 || height <= 0) return null;
   let hasPixels = false;
-  for (let i = 0; i < edits.length; i += 1) {
-    if (edits[i] === 0) continue;
-    hasPixels = true;
-    const idx = i * 4;
-    if (edits[i] === -1) {
-      overlay.data[idx] = 239;
-      overlay.data[idx + 1] = 68;
-      overlay.data[idx + 2] = 68;
-      overlay.data[idx + 3] = 120;
-    } else {
-      overlay.data[idx] = 34;
-      overlay.data[idx + 1] = 197;
-      overlay.data[idx + 2] = 94;
-      overlay.data[idx + 3] = 95;
+  for (let index = 0; index < edits.length; index += 1) {
+    if (edits[index] !== 0) {
+      hasPixels = true;
+      break;
     }
   }
-  if (!hasPixels) return;
-  const temp = document.createElement("canvas");
-  temp.width = width;
-  temp.height = height;
-  const tctx = temp.getContext("2d");
-  if (!tctx) return;
-  tctx.putImageData(overlay, 0, 0);
-  ctx.drawImage(temp, 0, 0);
+  if (!hasPixels) return null;
+
+  const overlayCanvas = document.createElement("canvas");
+  overlayCanvas.width = width;
+  overlayCanvas.height = height;
+  const context = overlayCanvas.getContext("2d");
+  if (!context) return null;
+  const overlay = context.createImageData(width, height);
+  for (let index = 0; index < edits.length; index += 1) {
+    if (edits[index] === 0) continue;
+    const offset = index * 4;
+    if (edits[index] === -1) {
+      overlay.data[offset] = 239;
+      overlay.data[offset + 1] = 68;
+      overlay.data[offset + 2] = 68;
+      overlay.data[offset + 3] = 120;
+    } else {
+      overlay.data[offset] = 34;
+      overlay.data[offset + 1] = 197;
+      overlay.data[offset + 2] = 94;
+      overlay.data[offset + 3] = 95;
+    }
+  }
+  context.putImageData(overlay, 0, 0);
+  return overlayCanvas;
 }
 
 function drawLineGuide(

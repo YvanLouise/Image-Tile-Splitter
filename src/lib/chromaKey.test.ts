@@ -202,6 +202,41 @@ describe("processChromaKey", () => {
     expect(despilled.resultData[1]).toBeLessThan(plain.resultData[1]);
   });
 
+  it("cleans an opaque outer fringe without shrinking its alpha", () => {
+    const background = [8, 16, 32, 255];
+    const fringe = [35, 40, 70, 255];
+    const foreground = [205, 155, 70, 255];
+    const source = image([background, fringe, foreground, foreground]);
+    const plain = processChromaKey(source, {
+      ...defaultChromaKeyParams,
+      keyColor: "#081020",
+      tolerance: 0,
+      softness: 0,
+      edgeContract: 0,
+      despill: 0,
+      outerOnly: false,
+    });
+    const refined = processChromaKey(source, {
+      ...defaultChromaKeyParams,
+      keyColor: "#081020",
+      tolerance: 0,
+      softness: 0,
+      edgeContract: 0,
+      despill: 100,
+      outerOnly: false,
+    });
+    const distanceToForeground = (data: Uint8ClampedArray) =>
+      Math.hypot(
+        data[4] - foreground[0],
+        data[5] - foreground[1],
+        data[6] - foreground[2],
+      );
+    expect(refined.resultData[7]).toBe(255);
+    expect(distanceToForeground(refined.resultData)).toBeLessThan(
+      distanceToForeground(plain.resultData),
+    );
+  });
+
   it("limits removal to key pixels connected to the canvas edge", () => {
     const green = [0, 255, 0, 255];
     const red = [220, 30, 30, 255];

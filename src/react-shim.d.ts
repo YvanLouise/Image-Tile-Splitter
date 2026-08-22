@@ -6,12 +6,15 @@ declare namespace JSX {
 
 declare namespace React {
   interface PointerEvent<T = Element> {
+    button: number;
     clientX: number;
     clientY: number;
     ctrlKey: boolean;
     metaKey: boolean;
     pointerId: number;
+    pointerType: string;
     currentTarget: T;
+    preventDefault(): void;
   }
 
   interface DragEvent<T = Element> {

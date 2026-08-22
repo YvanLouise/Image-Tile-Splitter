@@ -1,5 +1,6 @@
 import {
   ArrowDownAZ,
+  Check,
   Combine,
   Filter,
   ImageUp,
@@ -366,6 +367,19 @@ export function LeftPanel({
                   {item.pixelCount.toLocaleString()} px
                   {item.source ? ` · ${item.source}` : ""}
                 </small>
+                <button
+                  className="mobile-selection-toggle"
+                  type="button"
+                  title={t.mobile.toggleSelection}
+                  aria-label={`${t.mobile.toggleSelection} #${item.order + 1}`}
+                  aria-pressed={selected}
+                  onClick={(event) => {
+                    event.stopPropagation();
+                    onSelect(item.id, true);
+                  }}
+                >
+                  <Check size={15} />
+                </button>
                 <div className="order-buttons">
                   <button
                     type="button"

@@ -33,7 +33,13 @@ import type {
   ChromaPreviewMode,
   LoadedImage,
 } from "../types";
-import { createCheckerPattern, downloadUrl, formatBytes } from "../utils/canvas";
+import {
+  createCheckerPattern,
+  downloadUrl,
+  formatBytes,
+  getPinchTransform,
+  type CanvasPoint,
+} from "../utils/canvas";
 import { getAcceptedImageFile, hasAcceptedImageDrag } from "../utils/uploadDrop";
 
 interface ChromaWorkspaceProps {
@@ -42,6 +48,7 @@ interface ChromaWorkspaceProps {
   params: ChromaKeyParams;
   onParamsChange: (params: ChromaKeyParams) => void;
   onFileChange: (file: File) => void;
+  isCanvasVisible: boolean;
 }
 
 type CanvasTool = "eyedropper" | "exclude" | "pan";
@@ -79,13 +86,15 @@ export function ChromaWorkspace({
   params,
   onParamsChange,
   onFileChange,
+  isCanvasVisible,
 }: ChromaWorkspaceProps) {
   const [result, setResult] = useState<ChromaKeyResult | null>(null);
   const [previewMode, setPreviewMode] = useState<ChromaPreviewMode>("result");
   const [tool, setTool] = useState<CanvasTool>("eyedropper");
   const [zoom, setZoom] = useState(1);
   const [pan, setPan] = useState({ x: 32, y: 32 });
-  const [processing, setProcessing] = useState(false);
+  const [previewProcessing, setPreviewProcessing] = useState(false);
+  const [exporting, setExporting] = useState(false);
   const [appliedParams, setAppliedParams] = useState(params);
   const [colorDraft, setColorDraft] = useState(params.keyColor);
   const [previewInput, setPreviewInput] = useState<ChromaPreviewInput | null>(null);
@@ -96,6 +105,7 @@ export function ChromaWorkspace({
   const [uploadDragActive, setUploadDragActive] = useState(false);
   const effectiveParams = params.livePreview ? params : appliedParams;
   const excludedColors = params.excludedColors.filter(isExcludedColor);
+  const processing = previewProcessing || exporting;
 
   useEffect(() => {
     if (!source) {
@@ -112,10 +122,10 @@ export function ChromaWorkspace({
   useEffect(() => {
     if (!previewInput) {
       setResult(null);
-      setProcessing(false);
+      setPreviewProcessing(false);
       return;
     }
-    setProcessing(true);
+    setPreviewProcessing(true);
     let canceled = false;
     let task: ChromaWorkerTask | null = null;
     const timer = window.setTimeout(() => {
@@ -136,7 +146,7 @@ export function ChromaWorkspace({
           setResult(buildChromaKeyPreviewResult(previewInput, processed));
         })
         .finally(() => {
-          if (!canceled) setProcessing(false);
+          if (!canceled) setPreviewProcessing(false);
         });
     }, params.livePreview ? 120 : 0);
     return () => {
@@ -145,13 +155,6 @@ export function ChromaWorkspace({
       task?.cancel();
     };
   }, [effectiveParams, params.livePreview, previewInput]);
-
-  useEffect(() => {
-    if (!source) return;
-    const scale = Math.min(1, 760 / source.width, 560 / source.height);
-    setZoom(Math.max(0.05, scale));
-    setPan({ x: 36, y: 36 });
-  }, [source]);
 
   useEffect(() => setColorDraft(params.keyColor), [params.keyColor]);
 
@@ -181,11 +184,13 @@ export function ChromaWorkspace({
   async function exportResult() {
     if (!source || !result) return;
     const base = source.fileName.replace(/\.[^.]+$/, "") || "image";
-    setProcessing(true);
+    setExporting(true);
     try {
       await waitForNextPaint();
       const task = startChromaKeyTask(source.imageData, effectiveParams);
-      const processed = await task.promise;
+      const processed = await task.promise.catch(() =>
+        processChromaKey(source.imageData, effectiveParams),
+      );
       const blob = await chromaPixelsToBlob(
         source.width,
         source.height,
@@ -195,7 +200,7 @@ export function ChromaWorkspace({
       downloadUrl(url, sanitizePngFileName(exportFileName, `${base}-transparent.png`));
       window.setTimeout(() => URL.revokeObjectURL(url), 1000);
     } finally {
-      setProcessing(false);
+      setExporting(false);
     }
   }
 
@@ -457,6 +462,7 @@ export function ChromaWorkspace({
         onResultBackgroundChange={setResultBackground}
         onPickColor={(color, point) => onParamsChange({ ...params, keyColor: color, samplePoint: point })}
         onPickExcludedColor={addExcludedColor}
+        isVisible={isCanvasVisible}
       />
 
       <aside className="side-panel right-panel chroma-right-panel">
@@ -608,7 +614,15 @@ function startChromaKeyTask(
     type: "module",
   });
   const payload = new Uint8ClampedArray(imageData.data);
+  let settled = false;
+  let rejectTask: (reason?: unknown) => void = () => undefined;
+  const stopWorker = () => {
+    worker.onmessage = null;
+    worker.onerror = null;
+    worker.terminate();
+  };
   const promise = new Promise<ChromaPixelResult>((resolve, reject) => {
+    rejectTask = reject;
     worker.onmessage = (event: MessageEvent<{
       id: number;
       resultData?: ArrayBuffer;
@@ -617,8 +631,13 @@ function startChromaKeyTask(
       totalPixels?: number;
       error?: string;
     }>) => {
-      worker.terminate();
-      if (event.data.id !== id) return;
+      if (settled) return;
+      settled = true;
+      stopWorker();
+      if (event.data.id !== id) {
+        reject(new Error("Chroma worker returned a mismatched response."));
+        return;
+      }
       if (event.data.error || !event.data.resultData || !event.data.maskData) {
         reject(new Error(event.data.error ?? "Chroma worker returned no data."));
         return;
@@ -631,7 +650,9 @@ function startChromaKeyTask(
       });
     };
     worker.onerror = (event) => {
-      worker.terminate();
+      if (settled) return;
+      settled = true;
+      stopWorker();
       reject(new Error(event.message));
     };
     worker.postMessage(
@@ -648,7 +669,12 @@ function startChromaKeyTask(
 
   return {
     promise,
-    cancel: () => worker.terminate(),
+    cancel: () => {
+      if (settled) return;
+      settled = true;
+      stopWorker();
+      rejectTask(new Error("Chroma worker task canceled."));
+    },
   };
 }
 
@@ -668,6 +694,7 @@ function ChromaCanvas({
   onResultBackgroundChange,
   onPickColor,
   onPickExcludedColor,
+  isVisible,
 }: {
   t: UIStrings;
   source: LoadedImage | null;
@@ -684,6 +711,7 @@ function ChromaCanvas({
   onResultBackgroundChange: (background: ResultBackground) => void;
   onPickColor: (color: string, point: { x: number; y: number }) => void;
   onPickExcludedColor: (color: string, point: { x: number; y: number }) => void;
+  isVisible: boolean;
 }) {
   const canvasRef = useRef<HTMLCanvasElement | null>(null);
   const shellRef = useRef<HTMLDivElement | null>(null);
@@ -697,21 +725,88 @@ function ChromaCanvas({
     moved: boolean;
     panning: boolean;
   }>(null);
+  const activePointerIdRef = useRef<number | null>(null);
+  const touchPointersRef = useRef(new Map<number, CanvasPoint>());
+  const pendingTouchRef = useRef<null | {
+    pointerId: number;
+    clientX: number;
+    clientY: number;
+  }>(null);
+  const pinchRef = useRef<null | {
+    ids: [number, number];
+    startPoints: [CanvasPoint, CanvasPoint];
+    zoom: number;
+    pan: CanvasPoint;
+  }>(null);
   const [middlePanning, setMiddlePanning] = useState(false);
   const [canvasSize, setCanvasSize] = useState({ width: 900, height: 620 });
+  const hasMeasuredRef = useRef(false);
+  const autoFitSourceRef = useRef<LoadedImage | null>(null);
 
   useEffect(() => {
     const shell = shellRef.current;
     if (!shell) return;
-    const observer = new ResizeObserver(([entry]) => {
+    const measure = () => {
+      const rect = shell.getBoundingClientRect();
+      if (rect.width <= 0 || rect.height <= 0) return;
+      hasMeasuredRef.current = true;
       setCanvasSize({
-        width: Math.max(360, Math.floor(entry.contentRect.width)),
-        height: Math.max(320, Math.floor(entry.contentRect.height)),
+        width: Math.max(1, Math.floor(rect.width)),
+        height: Math.max(240, Math.floor(rect.height)),
+      });
+    };
+    const observer = new ResizeObserver(([entry]) => {
+      if (entry.contentRect.width <= 0 || entry.contentRect.height <= 0) return;
+      hasMeasuredRef.current = true;
+      setCanvasSize({
+        width: Math.max(1, Math.floor(entry.contentRect.width)),
+        height: Math.max(240, Math.floor(entry.contentRect.height)),
       });
     });
     observer.observe(shell);
-    return () => observer.disconnect();
-  }, []);
+    const frame = isVisible ? window.requestAnimationFrame(measure) : 0;
+    return () => {
+      observer.disconnect();
+      if (frame) window.cancelAnimationFrame(frame);
+    };
+  }, [isVisible]);
+
+  useEffect(() => {
+    if (!source) {
+      autoFitSourceRef.current = null;
+      return;
+    }
+    if (
+      !isVisible
+      || !hasMeasuredRef.current
+      || autoFitSourceRef.current === source
+    ) {
+      return;
+    }
+
+    const inset = window.matchMedia("(max-width: 900px)").matches ? 16 : 64;
+    const scale = Math.max(
+      0.05,
+      Math.min(
+        (canvasSize.width - inset * 2) / source.width,
+        (canvasSize.height - inset * 2) / source.height,
+        1,
+      ),
+    );
+    autoFitSourceRef.current = source;
+    onZoomChange(scale);
+    onPanChange({
+      x: (canvasSize.width - source.width * scale) / 2,
+      y: (canvasSize.height - source.height * scale) / 2,
+    });
+  }, [
+    canvasSize.height,
+    canvasSize.width,
+    isVisible,
+    onPanChange,
+    onZoomChange,
+    source,
+  ]);
 
   useEffect(() => {
     previewImagesRef.current = {};
@@ -812,9 +907,11 @@ function ChromaCanvas({
   function draw() {
     const canvas = canvasRef.current;
     if (!canvas) return;
-    const ratio = window.devicePixelRatio;
-    canvas.width = canvasSize.width * ratio;
-    canvas.height = canvasSize.height * ratio;
+    const ratio = Math.min(window.devicePixelRatio || 1, 2);
+    const backingWidth = Math.max(1, Math.round(canvasSize.width * ratio));
+    const backingHeight = Math.max(1, Math.round(canvasSize.height * ratio));
+    if (canvas.width !== backingWidth) canvas.width = backingWidth;
+    if (canvas.height !== backingHeight) canvas.height = backingHeight;
     canvas.style.width = `${canvasSize.width}px`;
     canvas.style.height = `${canvasSize.height}px`;
     const ctx = canvas.getContext("2d");
@@ -861,9 +958,10 @@ function ChromaCanvas({
 
   function fitToView() {
     if (!source) return;
+    const inset = window.matchMedia("(max-width: 900px)").matches ? 16 : 64;
     const scale = Math.min(
-      (canvasSize.width - 64) / source.width,
-      (canvasSize.height - 64) / source.height,
+      (canvasSize.width - inset * 2) / source.width,
+      (canvasSize.height - inset * 2) / source.height,
       1,
     );
     onZoomChange(Math.max(0.05, scale));
@@ -873,20 +971,181 @@ function ChromaCanvas({
     });
   }
 
-  function imagePoint(event: React.PointerEvent<HTMLCanvasElement>) {
-    const rect = event.currentTarget.getBoundingClientRect();
+  function imagePointAt(clientX: number, clientY: number) {
+    const rect = canvasRef.current?.getBoundingClientRect();
+    if (!rect) return { x: 0, y: 0 };
     return canvasToImagePoint(
-      event.clientX - rect.left,
-      event.clientY - rect.top,
+      clientX - rect.left,
+      clientY - rect.top,
       pan,
       zoom,
     );
   }
 
+  function localPointerPoint(event: React.PointerEvent<HTMLCanvasElement>) {
+    const rect = event.currentTarget.getBoundingClientRect();
+    return { x: event.clientX - rect.left, y: event.clientY - rect.top };
+  }
+
+  function startPointerInteraction(
+    pointerId: number,
+    clientX: number,
+    clientY: number,
+    button: number,
+  ) {
+    activePointerIdRef.current = pointerId;
+    dragRef.current = {
+      startX: clientX,
+      startY: clientY,
+      panX: pan.x,
+      panY: pan.y,
+      moved: false,
+      panning: tool === "pan" || button === 1,
+    };
+    setMiddlePanning(button === 1);
+  }
+
+  function pickColorAt(clientX: number, clientY: number) {
+    if (!source) return;
+    const point = imagePointAt(clientX, clientY);
+    const color = sampleHexColor(source.imageData, point.x, point.y);
+    const clampedPoint = {
+      x: Math.max(0, Math.min(source.width - 1, Math.floor(point.x))),
+      y: Math.max(0, Math.min(source.height - 1, Math.floor(point.y))),
+    };
+    if (tool === "exclude") {
+      onPickExcludedColor(color, clampedPoint);
+    } else if (tool === "eyedropper") {
+      onPickColor(color, clampedPoint);
+    }
+  }
+
+  function handleCanvasPointerDown(event: React.PointerEvent<HTMLCanvasElement>) {
+    if (!source || (event.button !== 0 && event.button !== 1)) return;
+    event.preventDefault();
+    event.currentTarget.setPointerCapture(event.pointerId);
+    if (event.pointerType !== "touch") {
+      startPointerInteraction(event.pointerId, event.clientX, event.clientY, event.button);
+      return;
+    }
+
+    touchPointersRef.current.set(event.pointerId, localPointerPoint(event));
+    if (touchPointersRef.current.size === 1) {
+      pendingTouchRef.current = {
+        pointerId: event.pointerId,
+        clientX: event.clientX,
+        clientY: event.clientY,
+      };
+      return;
+    }
+
+    if (touchPointersRef.current.size === 2 && !dragRef.current) {
+      const entries = [...touchPointersRef.current.entries()] as Array<[number, CanvasPoint]>;
+      pinchRef.current = {
+        ids: [entries[0][0], entries[1][0]],
+        startPoints: [entries[0][1], entries[1][1]],
+        zoom,
+        pan,
+      };
+      pendingTouchRef.current = null;
+      activePointerIdRef.current = null;
+    }
+  }
+
+  function handleCanvasPointerMove(event: React.PointerEvent<HTMLCanvasElement>) {
+    if (!source) return;
+    if (event.pointerType === "touch") {
+      touchPointersRef.current.set(event.pointerId, localPointerPoint(event));
+      const pinch = pinchRef.current;
+      if (pinch) {
+        const first = touchPointersRef.current.get(pinch.ids[0]);
+        const second = touchPointersRef.current.get(pinch.ids[1]);
+        if (first && second) {
+          const next = getPinchTransform(
+            pinch.startPoints,
+            [first, second],
+            pinch.zoom,
+            pinch.pan,
+          );
+          onZoomChange(next.zoom);
+          onPanChange(next.pan);
+        }
+        return;
+      }
+
+      const pending = pendingTouchRef.current;
+      if (pending?.pointerId === event.pointerId) {
+        const moved = Math.hypot(
+          event.clientX - pending.clientX,
+          event.clientY - pending.clientY,
+        );
+        if (moved <= 4) return;
+        pendingTouchRef.current = null;
+        startPointerInteraction(
+          event.pointerId,
+          pending.clientX,
+          pending.clientY,
+          0,
+        );
+      }
+    }
+
+    if (activePointerIdRef.current !== event.pointerId) return;
+    const activeDrag = dragRef.current;
+    if (!activeDrag) return;
+    const dx = event.clientX - activeDrag.startX;
+    const dy = event.clientY - activeDrag.startY;
+    activeDrag.moved = activeDrag.moved || Math.hypot(dx, dy) > 3;
+    if (activeDrag.panning) {
+      onPanChange({ x: activeDrag.panX + dx, y: activeDrag.panY + dy });
+    }
+  }
+
+  function handleCanvasPointerUp(event: React.PointerEvent<HTMLCanvasElement>) {
+    if (event.pointerType === "touch") {
+      const pinch = pinchRef.current;
+      touchPointersRef.current.delete(event.pointerId);
+      if (pinch?.ids.includes(event.pointerId)) {
+        pinchRef.current = null;
+        pendingTouchRef.current = null;
+        dragRef.current = null;
+        activePointerIdRef.current = null;
+        setMiddlePanning(false);
+        return;
+      }
+
+      const pending = pendingTouchRef.current;
+      if (pending?.pointerId === event.pointerId) {
+        pendingTouchRef.current = null;
+        pickColorAt(pending.clientX, pending.clientY);
+        return;
+      }
+    }
+
+    if (activePointerIdRef.current !== event.pointerId) return;
+    const activeDrag = dragRef.current;
+    dragRef.current = null;
+    activePointerIdRef.current = null;
+    setMiddlePanning(false);
+    if (!activeDrag || activeDrag.panning || activeDrag.moved) return;
+    pickColorAt(event.clientX, event.clientY);
+  }
+
+  function handleCanvasPointerCancel(event: React.PointerEvent<HTMLCanvasElement>) {
+    touchPointersRef.current.delete(event.pointerId);
+    if (pinchRef.current?.ids.includes(event.pointerId)) pinchRef.current = null;
+    if (pendingTouchRef.current?.pointerId === event.pointerId) pendingTouchRef.current = null;
+    if (activePointerIdRef.current === event.pointerId) {
+      dragRef.current = null;
+      activePointerIdRef.current = null;
+      setMiddlePanning(false);
+    }
+  }
+
   return (
     <main className="canvas-panel chroma-canvas-panel">
       <div className="canvas-heading chroma-canvas-heading">
-        <div>
+        <div className="chroma-canvas-title">
           <h2>{t.chroma.canvasTitle}</h2>
           <span>{source ? `${source.width} x ${source.height}` : t.canvas.waiting}</span>
         </div>
@@ -896,9 +1155,18 @@ function ChromaCanvas({
               <button
                 key={mode}
                 className={previewMode === mode ? "active" : ""}
+                aria-label={t.chroma.previewModes[mode]}
+                title={t.chroma.previewModes[mode]}
                 onClick={() => onPreviewModeChange(mode)}
               >
-                {t.chroma.previewModes[mode]}
+                <span className="desktop-preview-label">
+                  {t.chroma.previewModes[mode]}
+                </span>
+                <span className="mobile-preview-label" aria-hidden="true">
+                  {mode === "result"
+                    ? t.mobile.tabs.result
+                    : t.chroma.previewModes[mode]}
+                </span>
               </button>
             ))}
           </div>
@@ -979,54 +1247,10 @@ function ChromaCanvas({
               ? "eyedropper-cursor"
               : "pan-cursor"
           }
-          onPointerDown={(event) => {
-            if (!source || (event.button !== 0 && event.button !== 1)) return;
-            event.preventDefault();
-            const panning = tool === "pan" || event.button === 1;
-            event.currentTarget.setPointerCapture(event.pointerId);
-            dragRef.current = {
-              startX: event.clientX,
-              startY: event.clientY,
-              panX: pan.x,
-              panY: pan.y,
-              moved: false,
-              panning,
-            };
-            setMiddlePanning(event.button === 1);
-          }}
-          onPointerMove={(event) => {
-            const drag = dragRef.current;
-            if (!drag) return;
-            const dx = event.clientX - drag.startX;
-            const dy = event.clientY - drag.startY;
-            drag.moved = drag.moved || Math.hypot(dx, dy) > 3;
-            if (!drag.panning) return;
-            onPanChange({ x: drag.panX + dx, y: drag.panY + dy });
-          }}
-          onPointerUp={(event) => {
-            const drag = dragRef.current;
-            dragRef.current = null;
-            setMiddlePanning(false);
-            if (!source || !drag || drag.panning || drag.moved) return;
-            const point = imagePoint(event);
-            const color = sampleHexColor(source.imageData, point.x, point.y);
-            if (tool === "exclude") {
-              onPickExcludedColor(color, {
-                x: Math.max(0, Math.min(source.width - 1, Math.floor(point.x))),
-                y: Math.max(0, Math.min(source.height - 1, Math.floor(point.y))),
-              });
-              return;
-            }
-            if (tool !== "eyedropper") return;
-            onPickColor(color, {
-              x: Math.max(0, Math.min(source.width - 1, Math.floor(point.x))),
-              y: Math.max(0, Math.min(source.height - 1, Math.floor(point.y))),
-            });
-          }}
-          onPointerCancel={() => {
-            dragRef.current = null;
-            setMiddlePanning(false);
-          }}
+          onPointerDown={handleCanvasPointerDown}
+          onPointerMove={handleCanvasPointerMove}
+          onPointerUp={handleCanvasPointerUp}
+          onPointerCancel={handleCanvasPointerCancel}
         />
       </div>
       <div className="canvas-status">
@@ -1036,6 +1260,9 @@ function ChromaCanvas({
             : tool === "exclude"
               ? t.chroma.excludeHint
               : t.chroma.panHint}
+        </span>
+        <span className="chroma-canvas-dimensions">
+          {source ? `${source.width} × ${source.height}` : ""}
         </span>
         <span>{Math.round(zoom * 100)}%</span>
       </div>

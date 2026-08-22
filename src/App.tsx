@@ -3,8 +3,10 @@ import { CanvasWorkspace } from "./components/CanvasWorkspace";
 import { ChromaWorkspace } from "./components/ChromaWorkspace";
 import { HelpModal } from "./components/HelpModal";
 import { LeftPanel } from "./components/LeftPanel";
+import { MobileWorkspaceNav } from "./components/MobileWorkspaceNav";
 import { RightPanel } from "./components/RightPanel";
 import { Toolbar } from "./components/Toolbar";
+import { useMediaQuery } from "./hooks/useMediaQuery";
 import { translations } from "./i18n";
 import { defaultComicDetectionParams } from "./lib/comicDetection";
 import { defaultChromaKeyParams } from "./lib/chromaKey";
@@ -39,12 +41,13 @@ import type {
   ChromaKeyParams,
   ComicDetectionParams,
   LoadedImage,
+  MobileWorkspaceTab,
   SegmentParams,
   SliceItem,
   ToolMode,
   WorkspaceLayout,
 } from "./types";
-import { fileToLoadedImage } from "./utils/canvas";
+import { disposeLoadedImage, fileToLoadedImage } from "./utils/canvas";
 import "./styles.css";
 
 const defaultParams: SegmentParams = {
@@ -60,6 +63,7 @@ function App() {
   const fileInputRef = useRef<HTMLInputElement | null>(null);
   const saveQueueRef = useRef<Promise<void>>(Promise.resolve());
   const latestSnapshotRef = useRef<WorkspaceSnapshot | null>(null);
+  const asyncOperationIdRef = useRef(0);
   const [language, setLanguage] = useState<Language>(() =>
     readPreference("language", "zh", ["zh", "en"]),
   );
@@ -71,6 +75,8 @@ function App() {
   );
   const [helpOpen, setHelpOpen] = useState(false);
   const [zoomReminderOpen, setZoomReminderOpen] = useState(false);
+  const [mobileTab, setMobileTab] = useState<MobileWorkspaceTab>("settings");
+  const isMobile = useMediaQuery("(max-width: 900px)");
   const [mode, setMode] = useState<AppMode>("transparent");
   const [tool, setTool] = useState<ToolMode>("select");
   const [params, setParams] = useState<SegmentParams>(defaultParams);
@@ -98,16 +104,34 @@ function App() {
   );
 
   useEffect(() => {
+    return () => {
+      asyncOperationIdRef.current += 1;
+    };
+  }, []);
+
+  useEffect(() => {
+    return () => {
+      if (state.source) disposeLoadedImage(state.source);
+    };
+  }, [state.source]);
+
+  useEffect(() => {
+    return () => {
+      if (chromaSource) disposeLoadedImage(chromaSource);
+    };
+  }, [chromaSource]);
+
+  useEffect(() => {
     document.documentElement.lang = language === "zh" ? "zh-CN" : "en";
-    localStorage.setItem("image-splitter-language", language);
+    writePreference("language", language);
   }, [language]);
 
   useEffect(() => {
-    localStorage.setItem("image-splitter-theme", theme);
+    writePreference("theme", theme);
   }, [theme]);
 
   useEffect(() => {
-    localStorage.setItem("image-splitter-layout", layout);
+    writePreference("layout", layout);
   }, [layout]);
 
   useEffect(() => {
@@ -132,9 +156,17 @@ function App() {
 
   useEffect(() => {
     let active = true;
+    const operationId = asyncOperationIdRef.current;
     void loadWorkspaceSnapshot()
       .then((restored) => {
-        if (!active || !restored) return;
+        if (!restored) return;
+        if (!active || operationId !== asyncOperationIdRef.current) {
+          if (restored.segmentationState.source) {
+            disposeLoadedImage(restored.segmentationState.source);
+          }
+          if (restored.chromaSource) disposeLoadedImage(restored.chromaSource);
+          return;
+        }
         setMode(restored.mode);
         setTool(restored.tool);
         setParams(restored.params);
@@ -226,24 +258,34 @@ function App() {
   }, [exportScope, selectedItems]);
 
   async function handleFile(file: File) {
-    const loaded = await fileToLoadedImage(file);
-    if (mode === "chroma") {
-      setChromaSource(loaded);
-      return;
-    }
-    if (mode === "comic") {
-      setDetecting(false);
-      dispatch({
-        type: "load",
-        source: loaded,
-        ...createComicReadyState(loaded, t.status.modeChanged(t.common.panel)),
-      });
-      fitInitialView(loaded.width, loaded.height);
-      return;
-    }
+    const operationId = asyncOperationIdRef.current + 1;
+    asyncOperationIdRef.current = operationId;
     setDetecting(false);
+    let loaded: LoadedImage | null = null;
     try {
+      loaded = await fileToLoadedImage(file);
+      if (operationId !== asyncOperationIdRef.current) return;
+
+      if (mode === "chroma") {
+        setChromaSource(loaded);
+        loaded = null;
+        setMobileTab("canvas");
+        return;
+      }
+      if (mode === "comic") {
+        dispatch({
+          type: "load",
+          source: loaded,
+          ...createComicReadyState(loaded, t.status.modeChanged(t.common.panel)),
+        });
+        fitInitialView(loaded.width, loaded.height);
+        loaded = null;
+        setMobileTab("canvas");
+        return;
+      }
+
       const output = await createInitialSegmentation(loaded, mode, params, comicParams);
+      if (operationId !== asyncOperationIdRef.current) return;
       dispatch({
         type: "load",
         source: loaded,
@@ -254,8 +296,11 @@ function App() {
         status: output.warning ? `${output.status}；${output.warning}` : output.status,
       });
       fitInitialView(loaded.width, loaded.height);
+      loaded = null;
+      setMobileTab("canvas");
     } finally {
-      setDetecting(false);
+      if (loaded) disposeLoadedImage(loaded);
+      if (operationId === asyncOperationIdRef.current) setDetecting(false);
     }
   }
 
@@ -266,12 +311,14 @@ function App() {
   }
 
   async function handleModeChange(nextMode: AppMode) {
+    const operationId = asyncOperationIdRef.current + 1;
+    asyncOperationIdRef.current = operationId;
     setMode(nextMode);
+    setDetecting(false);
     if (nextMode !== "transparent" && tool === "rangeExtract") setTool("select");
     if (nextMode === "chroma") return;
     if (!state.source) return;
     if (nextMode === "comic") {
-      setDetecting(false);
       dispatch({
         type: "apply",
         history: false,
@@ -282,9 +329,9 @@ function App() {
       });
       return;
     }
-    setDetecting(false);
     try {
       const output = await createInitialSegmentation(state.source, nextMode, params, comicParams);
+      if (operationId !== asyncOperationIdRef.current) return;
       dispatch({
         type: "apply",
         history: true,
@@ -299,7 +346,7 @@ function App() {
         },
       });
     } finally {
-      setDetecting(false);
+      if (operationId === asyncOperationIdRef.current) setDetecting(false);
     }
   }
 
@@ -324,6 +371,8 @@ function App() {
 
   async function handleAutoDetectComic() {
     if (detecting || !state.source || !state.originalMask || !state.edits) return;
+    const operationId = asyncOperationIdRef.current + 1;
+    asyncOperationIdRef.current = operationId;
     setDetecting(true);
     try {
       await waitForNextPaint();
@@ -335,6 +384,7 @@ function App() {
         params,
         comicParams,
       );
+      if (operationId !== asyncOperationIdRef.current) return;
       dispatch({
         type: "apply",
         history: true,
@@ -345,7 +395,7 @@ function App() {
         },
       });
     } finally {
-      setDetecting(false);
+      if (operationId === asyncOperationIdRef.current) setDetecting(false);
     }
   }
 
@@ -550,7 +600,13 @@ function App() {
   }
 
   return (
-    <div className="app-shell" data-theme={theme} data-layout={layout}>
+    <div
+      className="app-shell"
+      data-theme={theme}
+      data-layout={layout}
+      data-mode={mode}
+      data-mobile-tab={mobileTab}
+    >
       <input
         ref={fileInputRef}
         className="hidden-input"
@@ -580,6 +636,7 @@ function App() {
         onUploadClick={() => fileInputRef.current?.click()}
         onUndo={() => dispatch({ type: "undo" })}
         onRedo={() => dispatch({ type: "redo" })}
+        isMobile={isMobile}
       />
       {mode === "chroma" ? (
         <ChromaWorkspace
@@ -588,6 +645,7 @@ function App() {
           params={chromaParams}
           onParamsChange={setChromaParams}
           onFileChange={(file) => void handleFile(file)}
+          isCanvasVisible={!isMobile || mobileTab === "canvas"}
         />
       ) : (
         <div className="workspace">
@@ -631,6 +689,7 @@ function App() {
             onRectPanel={handleRectPanel}
             onPolygonPanel={handlePolygonPanel}
             onRangeExtract={handleRangeExtract}
+            isVisible={!isMobile || mobileTab === "canvas"}
           />
           <RightPanel
             t={t}
@@ -651,6 +710,7 @@ function App() {
           />
         </div>
       )}
+      <MobileWorkspaceNav activeTab={mobileTab} t={t} onChange={setMobileTab} />
       <footer className="status-bar">
         <span>{displayStatus()}</span>
         <span>{mode === "chroma" ? t.chroma.localProcessing : t.status.zoom(Math.round(zoom * 100))}</span>
@@ -716,6 +776,12 @@ function waitForNextPaint() {
       window.requestAnimationFrame(() => resolve());
     });
   });
+}
+
+function writePreference(key: string, value: string) {
+  try {
+    localStorage.setItem(`image-splitter-${key}`, value);
+  } catch {}
 }
 
 function readPreference<T extends string>(key: string, fallback: T, allowed: readonly T[]): T {
