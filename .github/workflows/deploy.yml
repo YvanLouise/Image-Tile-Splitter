@@ -13,7 +13,7 @@ permissions:
 
 concurrency:
   group: pages
-  cancel-in-progress: false
+  cancel-in-progress: true
 
 jobs:
   build:
@@ -29,10 +29,12 @@ jobs:
           cache: npm
 
       - name: Install dependencies
-        run: npm install
+        run: npm ci
 
       - name: Build
         run: npm run build
+        env:
+          VITE_APP_VERSION: ${{ github.sha }}
 
       - name: Prepare GitHub Pages paths
         run: npm run prepare:github
