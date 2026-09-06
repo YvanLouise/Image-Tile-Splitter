@@ -61,6 +61,10 @@ type PreviewRaster = {
   result: HTMLCanvasElement;
   mask: HTMLCanvasElement;
 };
+type ChromaPreviewRequest = {
+  preview: ChromaPreviewInput;
+  params: ChromaKeyParams;
+};
 
 const resultBackgroundSwatches = [
   "#ffffff",
@@ -103,10 +107,16 @@ export function ChromaWorkspace({
   const [exportFileName, setExportFileName] = useState("");
   const uploadDragDepthRef = useRef(0);
   const [uploadDragActive, setUploadDragActive] = useState(false);
+  const previewInputRef = useRef(previewInput);
+  const queuedPreviewRef = useRef<ChromaPreviewRequest | null>(null);
+  const activePreviewTaskRef = useRef<ChromaWorkerTask | null>(null);
+  const previewLoopRunningRef = useRef(false);
+  const previewMountedRef = useRef(true);
   const effectiveParams = params.livePreview ? params : appliedParams;
   const excludedColors = params.excludedColors.filter(isExcludedColor);
   const processing = previewProcessing || exporting;
 
+  previewInputRef.current = previewInput;
   useEffect(() => {
     if (!source) {
       setResult(null);
@@ -119,42 +129,74 @@ export function ChromaWorkspace({
     setExportFileName(`${base}-transparent`);
   }, [source]);
 
+  async function runPreviewQueue() {
+    if (previewLoopRunningRef.current || !previewMountedRef.current) return;
+    previewLoopRunningRef.current = true;
+
+    try {
+      while (previewMountedRef.current && queuedPreviewRef.current) {
+        const request = queuedPreviewRef.current;
+        queuedPreviewRef.current = null;
+        const task = startChromaKeyTask(request.preview.imageData, request.params);
+        activePreviewTaskRef.current = task;
+
+        let processed: ChromaPixelResult;
+        try {
+          processed = await task.promise;
+        } catch {
+          if (
+            !previewMountedRef.current
+            || previewInputRef.current !== request.preview
+          ) {
+            continue;
+          }
+          processed = processChromaKey(request.preview.imageData, request.params);
+        } finally {
+          if (activePreviewTaskRef.current === task) activePreviewTaskRef.current = null;
+        }
+
+        if (
+          previewMountedRef.current
+          && previewInputRef.current === request.preview
+        ) {
+          setResult(buildChromaKeyPreviewResult(request.preview, processed));
+        }
+      }
+    } finally {
+      previewLoopRunningRef.current = false;
+      if (previewMountedRef.current && queuedPreviewRef.current) {
+        void runPreviewQueue();
+      } else if (previewMountedRef.current) {
+        setPreviewProcessing(false);
+      }
+    }
+  }
+
+  useEffect(() => {
+    previewMountedRef.current = true;
+    return () => {
+      previewMountedRef.current = false;
+      queuedPreviewRef.current = null;
+      activePreviewTaskRef.current?.cancel();
+    };
+  }, []);
+
   useEffect(() => {
     if (!previewInput) {
+      queuedPreviewRef.current = null;
+      activePreviewTaskRef.current?.cancel();
       setResult(null);
       setPreviewProcessing(false);
       return;
     }
-    setPreviewProcessing(true);
-    let canceled = false;
-    let task: ChromaWorkerTask | null = null;
-    const timer = window.setTimeout(() => {
-      task = startChromaKeyTask(
-        previewInput.imageData,
-        scaleChromaParamsForPreview(previewInput, effectiveParams),
-      );
-      task.promise
-        .then((processed) => {
-          if (!canceled) setResult(buildChromaKeyPreviewResult(previewInput, processed));
-        })
-        .catch(() => {
-          if (canceled) return;
-          const processed = processChromaKey(
-            previewInput.imageData,
-            scaleChromaParamsForPreview(previewInput, effectiveParams),
-          );
-          setResult(buildChromaKeyPreviewResult(previewInput, processed));
-        })
-        .finally(() => {
-          if (!canceled) setPreviewProcessing(false);
-        });
-    }, params.livePreview ? 120 : 0);
-    return () => {
-      canceled = true;
-      window.clearTimeout(timer);
-      task?.cancel();
+
+    queuedPreviewRef.current = {
+      preview: previewInput,
+      params: scaleChromaParamsForPreview(previewInput, effectiveParams),
     };
-  }, [effectiveParams, params.livePreview, previewInput]);
+    setPreviewProcessing(true);
+    void runPreviewQueue();
+  }, [effectiveParams, previewInput]);
 
   useEffect(() => setColorDraft(params.keyColor), [params.keyColor]);
 
